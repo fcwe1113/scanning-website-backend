@@ -1,21 +1,34 @@
 mod connection_info;
 
-use std::string::String;
+use std::{
+    string::String,
+    env,
+    iter,
+    net::SocketAddr,
+    sync::{Arc, Mutex}
+};
 use crate::connection_info::ConnectionInfo;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use futures::{StreamExt, SinkExt};
-use std::{env, iter, net::SocketAddr};
-use std::sync::{Arc, Mutex};
 use clap::builder::Str;
 use log::{info, error, debug};
 use rand::Rng;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+use tracing_subscriber::{util::SubscriberInitExt, prelude::__tracing_subscriber_SubscriberExt};
 use tungstenite::Utf8Bytes;
+use unicode_segmentation::UnicodeSegmentation;
+
 
 #[tokio::main]
 async fn main() {
+    // text truncating
+    // either sanitise input into only sending ascii
+    // or do the jank below
+    // let mut test = String::from("你tester");
+    // let mut slice = test.unicode_words().collect::<Vec<&str>>();
+    // println!("{:?}", slice);
+
+
     // Initialize the logger
     tracing_subscriber::registry()
         .with(
@@ -50,6 +63,7 @@ async fn main() {
         // AAAANNNNDDDD it just uses the first connection and ignores the second connection memory leak style
         // todo
         // either disable this dickish behaviour in react or somehow find a way to disconnect the redundant connection here
+        // disabled it on react by disabling strict mode yaaaaaaaaaaaaaaayyyyyy
 
         {
             // this code here is surrounded with {} bc we want to ensure the entire code block here locks up
@@ -123,6 +137,16 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: String, l
                     // 5 = transferring to till (either by choice or to check id)
                     // 6 = after payment/logging out
 
+                // get first char
+                let first_char = text.chars().next().unwrap();
+
+                // get the rest of the string
+                let msg = text.chars().next().map(|c| &text[c.len_utf8()..]).unwrap().to_string();
+
+                match first_char {
+                    '1' => info!("passing \"{}\" into start screen func", msg),
+                    _ => {error!("lol")}
+                }
 
 
 
