@@ -1,4 +1,5 @@
 mod connection_info;
+mod token_exchange;
 
 use std::{
     string::String,
@@ -8,6 +9,7 @@ use std::{
     sync::{Arc, Mutex}
 };
 use crate::connection_info::ConnectionInfo;
+use crate::token_exchange::*;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use futures::{StreamExt, SinkExt};
@@ -61,7 +63,7 @@ async fn main() {
         // we loop thru the connections list and if the ip is already on the list we drop the request
         // AAAANNNNDDDD it doesnt work as react connects in with different port for each connection
         // AAAANNNNDDDD it just uses the first connection and ignores the second connection memory leak style
-        // todo
+        // todo0
         // either disable this dickish behaviour in react or somehow find a way to disconnect the redundant connection here
         // disabled it on react by disabling strict mode yaaaaaaaaaaaaaaayyyyyy
 
@@ -79,13 +81,12 @@ async fn main() {
             }
 
             if !is_duplicate {
-                let token = token_gen(&temp_connections_list);
-                temp_connections_list.push(ConnectionInfo::new(addr, token.clone()));
+                temp_connections_list.push(ConnectionInfo::new(addr, String::from("-1")));
                 info!("New connection from: {}", addr);
                 debug!("{:#?}", temp_connections_list);
                 // Spawn a new task for each connection
                 // note this line makes a new thread for each connection
-                tokio::spawn(handle_connection(stream, addr, token, connections_list_lock.clone()));
+                tokio::spawn(handle_connection(stream, addr, connections_list_lock.clone()));
             } else {
                 info!("duplicate connection request from: {}, dropping", addr);
             }
@@ -93,7 +94,7 @@ async fn main() {
     }
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: String, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) {
+async fn handle_connection(stream: TcpStream, addr: SocketAddr, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) {
     // note we dont want to lock the list and pass the list in by ref
     // do that and only one client can access the list until it dcs
 
@@ -117,7 +118,8 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: String, l
     let (mut sender, mut receiver) = ws_stream.split();
 
     // send the token to the client
-    if let Err(e) = sender.send(Message::Text(token.clone().into())).await {
+    let token = token_gen(&*list_lock.lock().unwrap()); // 0a generate valid token
+    if let Err(e) = sender.send(Message::Text(token.into())).await /*0a sends token to client*/ {
         error!("Error sending message to {}: {}", addr, e);
     } else {
         info!("Token sent to {}: {}", addr, token);
@@ -127,23 +129,68 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: String, l
     while let Some(msg) = receiver.next().await {
         match msg {
             Ok(Message::Text(text)) => {
-                // ideally each message would bring along data indicating client status to prevent hacker fuckery
+                // ideally a status check should be done per set time period confirming client status to prevent hacker fuckery
+                // and both sides should move in lock step anyways to prevent bugs
+                // keep in mind that both client and server should have the same values and vars except for the one that they are actively changing
+
                 // first digit denotes client screen status
                 // after reading the first digit get rid of it and pass the rest of the message into the relevant function
+                // messages sent from both ends should follow a similar format (at least for the first few chars)
+                // *** denotes client side tasks
+                    // 0 = token exchange
+                        // a. when the websocket channel opens the server will generate the token and send it to the client, the client would have a placeholder token which prevent the client from proceeding
+                        // b. the client pings back the same token to the server***
+                        // c. the server sends an ack back if the token matches and switches the token_exchanged flag on and saves it in the list(tm)
+                        // d. client then tells the server to move on to the start screen state***
+                        // e. server sends another ack then moves on, unless the token_exchanged flag is not on, in which case handle the error
+                        // f. client moves on for real***
+                        // while the client is waiting for the token exchange ack it can show a loading wheel or something idk
                     // 1 = start screen
                     // 2 = sign up screen
-                    // 3 = main app (the scanning screen)
-                    // 4 = payment screen
-                    // 5 = transferring to till (either by choice or to check id)
-                    // 6 = after payment/logging out
+                    // 3 = store locator
+                    // 4 = main app (the scanning screen)
+                    // 5 = payment screen
+                    // 6 = transferring to till (either by choice or to check id)
+                    // 7 = after payment/logging out
+
+                // vars indicating client status split by which relevant stage the client is in
+                // token exchange
+                let mut token_exchanged = false; // used in step 0e
 
                 // get first char
                 let first_char = text.chars().next().unwrap();
 
                 // get the rest of the string
-                let msg = text.chars().next().map(|c| &text[c.len_utf8()..]).unwrap().to_string();
+                let msg = text.chars().next().map(|c| &text[c.len_utf8()..]).unwrap().to_string(); // 0a
 
+                // no need to lock anything used here as no message that can interfere with each other should interfere with each other
                 match first_char {
+                    '0' => {
+                        let result = token_exchange(msg, &token, &mut sender, &addr, &token_exchanged);
+                        match result {
+                            Ok(r) => {
+                                match r {
+                                    "token ackked" => {
+                                        token_exchanged = true; // 0c flag
+                                        for ConnectionInfo in list_lock.lock().unwrap() {
+                                            if ConnectionInfo.addr == addr {
+                                                ConnectionInfo.token = token.clone(); // 0c saves on list
+                                            }
+                                        };
+                                    }, //0c
+                                    "moving on" => println!("moving onto start screen"), // 0e moving on todo
+                                    _ => error!("how did this happen lol")
+                                }
+                            },
+                            Err(e) => {
+                                // for now every error the server gets would lead to disconnect
+                                // maybe can implement a tier system later where some lead to retries
+                                // and others lead to straight disconnects
+                                error!("{}", e);
+                                break;
+                            }
+                        }
+                    },
                     '1' => info!("passing \"{}\" into start screen func", msg),
                     _ => {error!("lol")}
                 }
@@ -190,27 +237,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: String, l
             }
         }
     }
+
+
 }
 
-fn token_gen(list: &Vec<ConnectionInfo>) -> String {
-    // function for generating user tokens
-    // will check if the token is used before returning it
-
-    let len = 10;
-    let mut output = String::new();
-    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    loop {
-        let mut rng = rand::thread_rng();
-        let one_char = || CHARSET[rng.gen_range(0..CHARSET.len())] as char;
-        output = iter::repeat_with(one_char).take(len).collect();
-        let mut taken = false;
-        for li in list {
-            if li.token == output{
-                taken = true
-            }
-        }
-        if !taken { break; }
-    }
-
-    output
-}
