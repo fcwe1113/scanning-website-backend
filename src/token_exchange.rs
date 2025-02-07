@@ -4,18 +4,20 @@ use std::net::SocketAddr;
 use anyhow::{bail, Error};
 use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
+use log::debug;
 use rand::Rng;
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::{Message, Utf8Bytes};
 use crate::connection_info::ConnectionInfo;
 
-pub(crate) async fn token_exchange(msg: String, token: &String, mut sender: &SplitSink<WebSocketStream<TcpStream>, Message>, addr: &SocketAddr, flag: &bool) -> Result<(), Error> {
+pub(crate) async fn token_exchange(msg: String, token: &String, sender: &mut SplitSink<WebSocketStream<tokio::net::TcpStream>, tungstenite::Message>, addr: &SocketAddr, flag: &bool) -> Result<String, Error> {
 
     if (msg == "NEXT") {
+        debug!("{}", flag.to_string());
         if *flag == true { // 0e check flag
-            if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("0ACK"))).await /*0e ack*/ {}
-            Ok("moving on".into())
+            if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("0NEXT"))).await /*0e ack*/ {}
+            Ok(String::from("moving on"))
         } else {
             bail!("client tries to move to start screen before token was exchanged") // 0e error handling
         }
@@ -23,7 +25,7 @@ pub(crate) async fn token_exchange(msg: String, token: &String, mut sender: &Spl
         if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("0ACK"))).await /*0c ack*/ {
             bail!("failed to send token ack message to {}: {}", addr, e);
         } else {
-            Ok("token ackked".into())
+            Ok(String::from("token ackked"))
         }
     } else {
         bail!("client token mismatch, are you a naughty hacker?")

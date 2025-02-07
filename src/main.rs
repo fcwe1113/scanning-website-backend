@@ -1,5 +1,6 @@
 mod connection_info;
 mod token_exchange;
+mod screen_state;
 
 use std::{
     string::String,
@@ -19,7 +20,7 @@ use rand::Rng;
 use tracing_subscriber::{util::SubscriberInitExt, prelude::__tracing_subscriber_SubscriberExt};
 use tungstenite::Utf8Bytes;
 use unicode_segmentation::UnicodeSegmentation;
-
+use crate::screen_state::ScreenState;
 
 #[tokio::main]
 async fn main() {
@@ -86,7 +87,8 @@ async fn main() {
                 debug!("{:#?}", temp_connections_list);
                 // Spawn a new task for each connection
                 // note this line makes a new thread for each connection
-                tokio::spawn(handle_connection(stream, addr, connections_list_lock.clone()));
+                // 0a generate valid token
+                tokio::spawn(handle_connection(stream, addr, token_gen(&*temp_connections_list), false,  connections_list_lock.clone()));
             } else {
                 info!("duplicate connection request from: {}, dropping", addr);
             }
@@ -94,7 +96,12 @@ async fn main() {
     }
 }
 
-async fn handle_connection(stream: TcpStream, addr: SocketAddr, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) {
+// note:
+// i tried to pass in the vector element reference but to no avail
+// rust explicitly bans this unless ur willing to jump thru the hoops
+// which im not
+// for now every change to the list requires a mutex lock
+async fn handle_connection(stream: TcpStream, addr: SocketAddr, token: String, mut token_exchanged: bool, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) {
     // note we dont want to lock the list and pass the list in by ref
     // do that and only one client can access the list until it dcs
 
@@ -118,8 +125,7 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, list_lock: Arc<M
     let (mut sender, mut receiver) = ws_stream.split();
 
     // send the token to the client
-    let token = token_gen(&*list_lock.lock().unwrap()); // 0a generate valid token
-    if let Err(e) = sender.send(Message::Text(token.into())).await /*0a sends token to client*/ {
+    if let Err(e) = sender.send(Message::Text(format!("0{}",token).into())).await /*0a sends token to client*/ {
         error!("Error sending message to {}: {}", addr, e);
     } else {
         info!("Token sent to {}: {}", addr, token);
@@ -129,6 +135,8 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, list_lock: Arc<M
     while let Some(msg) = receiver.next().await {
         match msg {
             Ok(Message::Text(text)) => {
+                debug!("Message received from {}: {}", addr, text);
+
                 // ideally a status check should be done per set time period confirming client status to prevent hacker fuckery
                 // and both sides should move in lock step anyways to prevent bugs
                 // keep in mind that both client and server should have the same values and vars except for the one that they are actively changing
@@ -137,48 +145,58 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, list_lock: Arc<M
                 // after reading the first digit get rid of it and pass the rest of the message into the relevant function
                 // messages sent from both ends should follow a similar format (at least for the first few chars)
                 // *** denotes client side tasks
-                    // 0 = token exchange
-                        // a. when the websocket channel opens the server will generate the token and send it to the client, the client would have a placeholder token which prevent the client from proceeding
-                        // b. the client pings back the same token to the server***
-                        // c. the server sends an ack back if the token matches and switches the token_exchanged flag on and saves it in the list(tm)
-                        // d. client then tells the server to move on to the start screen state***
-                        // e. server sends another ack then moves on, unless the token_exchanged flag is not on, in which case handle the error
-                        // f. client moves on for real***
-                        // while the client is waiting for the token exchange ack it can show a loading wheel or something idk
-                    // 1 = start screen
-                    // 2 = sign up screen
-                    // 3 = store locator
-                    // 4 = main app (the scanning screen)
-                    // 5 = payment screen
-                    // 6 = transferring to till (either by choice or to check id)
-                    // 7 = after payment/logging out
+                // 0 = token exchange
+                // a. when the websocket channel opens the server will generate the token and send it to the client, the client would have a placeholder token which prevent the client from proceeding
+                // b. the client saves the token and pings back the same token to the server***
+                // c. the server sends an ack back if the token matches and switches the token_exchanged flag on and saves it in the list(tm)
+                // d. client then tells the server to move on to the start screen state***
+                // e. server tells client to move on then moves on itself, unless the token_exchanged flag is not on, in which case handle the error
+                // f. client moves on for real***
+                // while the client is waiting for the token exchange ack it can show a loading wheel or something idk
+                // 1 = start screen
+                // 2 = sign up screen
+                // 3 = store locator
+                // 4 = main app (the scanning screen)
+                // 5 = payment screen
+                // 6 = transferring to till (either by choice or to check id)
+                // 7 = after payment/logging out
 
                 // vars indicating client status split by which relevant stage the client is in
                 // token exchange
-                let mut token_exchanged = false; // used in step 0e
+                //let mut token_exchanged = false; // used in step 0e
 
                 // get first char
                 let first_char = text.chars().next().unwrap();
 
                 // get the rest of the string
                 let msg = text.chars().next().map(|c| &text[c.len_utf8()..]).unwrap().to_string(); // 0a
-
+                // debug!("msg: {} {}", msg, token);
                 // no need to lock anything used here as no message that can interfere with each other should interfere with each other
                 match first_char {
                     '0' => {
                         let result = token_exchange(msg, &token, &mut sender, &addr, &token_exchanged);
-                        match result {
+                        match result.await {
                             Ok(r) => {
-                                match r {
+                                match r.as_str() {
                                     "token ackked" => {
+                                        debug!("Token ackked");
                                         token_exchanged = true; // 0c flag
-                                        for ConnectionInfo in list_lock.lock().unwrap() {
-                                            if ConnectionInfo.addr == addr {
-                                                ConnectionInfo.token = token.clone(); // 0c saves on list
+                                        debug!("{:#?}", token_exchanged);
+                                        for Connection in list_lock.lock().unwrap().iter_mut() {
+                                            if Connection.addr == addr {
+                                                Connection.token = token.clone(); // 0c saves on list
                                             }
                                         };
                                     }, //0c
-                                    "moving on" => println!("moving onto start screen"), // 0e moving on todo
+                                    "moving on" => {
+                                        for connection_info in list_lock.lock().unwrap().iter_mut() {
+                                            if connection_info.addr == addr {
+                                                connection_info.screen = ScreenState::Start;
+                                            }
+                                        }
+                                        println!("moving onto start screen");
+
+                                    }, // 0e moving on todo
                                     _ => error!("how did this happen lol")
                                 }
                             },
@@ -192,11 +210,8 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, list_lock: Arc<M
                         }
                     },
                     '1' => info!("passing \"{}\" into start screen func", msg),
-                    _ => {error!("lol")}
+                    _ => { error!("lol") }
                 }
-
-
-
 
 
                 // Reverse the received string and send it back
@@ -237,7 +252,5 @@ async fn handle_connection(stream: TcpStream, addr: SocketAddr, list_lock: Arc<M
             }
         }
     }
-
-
 }
 
