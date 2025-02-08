@@ -6,12 +6,13 @@ pub(crate) struct ConnectionInfo {
     pub(crate) addr: SocketAddr,
     pub(crate) token: String,
     pub(crate) token_exchanged: bool,
-    pub(crate) screen: ScreenState
+    pub(crate) screen: ScreenState,
+    pub(crate) username: String,
     // add more crap here later
 }
 
 impl ConnectionInfo {
     pub(crate) fn new(addr: SocketAddr, token: String) -> ConnectionInfo {
-        ConnectionInfo { addr, token, token_exchanged: false, screen: ScreenState::TokenHandshake }
+        ConnectionInfo { addr, token, token_exchanged: false, screen: ScreenState::TokenHandshake, username: "".to_string() }
     }
 }

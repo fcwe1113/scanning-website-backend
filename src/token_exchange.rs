@@ -7,7 +7,7 @@ use anyhow::{bail, Error};
 use async_channel::Sender;
 use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
-use log::debug;
+use log::{debug, info};
 use rand::Rng;
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
@@ -27,7 +27,42 @@ use crate::screen_state::ScreenState;
     // while the client is waiting for the token exchange ack it can show a loading wheel or something idk
 
 pub(crate) async fn token_exchange_handler(msg: String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>, token_exchanged: &mut bool, addr: &SocketAddr, token: &String, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) -> Result<(), Error>{
-    let result = token_exchange(msg.clone(), &token, sender, addr, &token_exchanged);
+
+    // rust does not allow &mut var to be passed into funcs as &var so we cop out and clone the guy
+    // we only needed to read the value anyways
+    let flag = token_exchanged.clone();
+    let result = token_exchange(msg.clone(), &token, sender, addr, &flag);
+
+    if let Err(e) = resolve_result(result, token_exchanged, addr, token, list_lock).await{
+        bail!(e);
+    }
+
+    Ok(())
+}
+
+async fn token_exchange(msg: String, token: &String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>, addr: &SocketAddr, flag: &bool) -> Result<String, Error> {
+
+    if (msg == "NEXT") {
+        // debug!("{}", flag.to_string());
+        if *flag == true { // 0e check flag
+            if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("0NEXT"))).await /*0e ack*/ {}
+            Ok(String::from("moving on"))
+        } else {
+            bail!("client {addr} tries to move to start screen before token was exchanged") // 0e error handling
+        }
+    } else if (msg == *token){ // 0c check token
+        if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("0ACK"))).await /*0c ack*/ {
+            bail!("failed to send token ack message to {}: {}", addr, e);
+        } else {
+            Ok(String::from("token ackked for client {addr}"))
+        }
+    } else {
+        bail!("client {addr} token mismatch, are you a naughty hacker?")
+    }
+
+}
+
+async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Sized, token_exchanged: &mut bool, addr: &SocketAddr, token: &String, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) -> Result<(), Error> {
     match result.await {
         Ok(r) => {
             match r.as_str() {
@@ -48,9 +83,8 @@ pub(crate) async fn token_exchange_handler(msg: String, sender: &mut SplitSink<W
                             connection_info.screen = ScreenState::Start;
                         }
                     }
-                    println!("moving onto start screen");
+                    info!("moving client {} onto start screen", addr);
                     Ok(())
-
                 },
                 _ => {
                     bail!("how did this happen lol");
@@ -61,28 +95,6 @@ pub(crate) async fn token_exchange_handler(msg: String, sender: &mut SplitSink<W
             bail!(e);
         }
     }
-}
-
-pub(crate) async fn token_exchange(msg: String, token: &String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>, addr: &SocketAddr, flag: &bool) -> Result<String, Error> {
-
-    if (msg == "NEXT") {
-        debug!("{}", flag.to_string());
-        if *flag == true { // 0e check flag
-            if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("0NEXT"))).await /*0e ack*/ {}
-            Ok(String::from("moving on"))
-        } else {
-            bail!("client tries to move to start screen before token was exchanged") // 0e error handling
-        }
-    } else if (msg == *token){ // 0c check token
-        if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("0ACK"))).await /*0c ack*/ {
-            bail!("failed to send token ack message to {}: {}", addr, e);
-        } else {
-            Ok(String::from("token ackked"))
-        }
-    } else {
-        bail!("client token mismatch, are you a naughty hacker?")
-    }
-
 }
 
 pub(crate) fn token_gen(list: &Vec<ConnectionInfo>) -> String {
