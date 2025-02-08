@@ -86,6 +86,7 @@ pub(crate) async fn client_connection(stream: TcpStream, addr: SocketAddr, token
                     // and server moves on to that state
                     // h. client receives message and also moves on to the next state
                 // 2 = sign up screen
+                    // NOTE:
                 // 3 = store locator
                 // 4 = main app (the scanning screen)
                 // 5 = payment screen

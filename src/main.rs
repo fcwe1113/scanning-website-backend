@@ -17,22 +17,25 @@ use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use futures::{StreamExt, SinkExt};
 use clap::builder::Str;
 use log::{info, error, debug};
-use rand::Rng;
+use rand::{rng, Rng};
 use tracing_subscriber::{util::SubscriberInitExt, prelude::__tracing_subscriber_SubscriberExt};
 use tungstenite::Utf8Bytes;
 use unicode_segmentation::UnicodeSegmentation;
+use rand::{SeedableRng, RngCore};
+use rand::distr::Alphanumeric;
+use rand_chacha::ChaCha20Rng;
 use crate::client_connection::client_connection;
 use crate::screen_state::ScreenState;
 
 #[tokio::main]
 async fn main() {
-    // text truncating
-    // either sanitise input into only sending ascii
-    // or do the jank below
-    // let mut test = String::from("你tester");
-    // let mut slice = test.unicode_words().collect::<Vec<&str>>();
-    // println!("{:?}", slice);
 
+    let mut rng = ChaCha20Rng::from_os_rng();
+
+    for i in 0..10 {
+        // salt generator for account creation
+        println!("{}", (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>());
+    }
 
     // Initialize the logger
     tracing_subscriber::registry()

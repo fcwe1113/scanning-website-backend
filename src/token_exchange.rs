@@ -7,7 +7,7 @@ use anyhow::{bail, Error};
 use async_channel::Sender;
 use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
-use log::{debug, info};
+use log::{debug, error, info};
 use rand::Rng;
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
@@ -45,7 +45,7 @@ async fn token_exchange(msg: String, token: &String, sender: &mut SplitSink<WebS
     if (msg == "NEXT") {
         // debug!("{}", flag.to_string());
         if *flag == true { // 0e check flag
-            if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("0NEXT"))).await /*0e ack*/ {}
+            if let Err(_e) = sender.send(Message::Text(Utf8Bytes::from("0NEXT"))).await /*0e ack*/ {}
             Ok(String::from("moving on"))
         } else {
             bail!("client {addr} tries to move to start screen before token was exchanged") // 0e error handling
@@ -54,7 +54,7 @@ async fn token_exchange(msg: String, token: &String, sender: &mut SplitSink<WebS
         if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("0ACK"))).await /*0c ack*/ {
             bail!("failed to send token ack message to {}: {}", addr, e);
         } else {
-            Ok(String::from("token ackked for client {addr}"))
+            Ok(String::from("token ackked"))
         }
     } else {
         bail!("client {addr} token mismatch, are you a naughty hacker?")
@@ -65,14 +65,16 @@ async fn token_exchange(msg: String, token: &String, sender: &mut SplitSink<WebS
 async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Sized, token_exchanged: &mut bool, addr: &SocketAddr, token: &String, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) -> Result<(), Error> {
     match result.await {
         Ok(r) => {
+            // debug!("result: {}", r.as_str());
             match r.as_str() {
+
                 "token ackked" => {
                     debug!("Token ackked");
                     *token_exchanged = true; // 0c flag
                     debug!("{:#?}", token_exchanged);
-                    for Connection in list_lock.lock().unwrap().iter_mut() {
-                        if Connection.addr == *addr {
-                            Connection.token = token.clone(); // 0c saves on list
+                    for connection in list_lock.lock().unwrap().iter_mut() {
+                        if connection.addr == *addr {
+                            connection.token = token.clone(); // 0c saves on list
                         }
                     }
                     Ok(())
@@ -87,6 +89,8 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
                     Ok(())
                 },
                 _ => {
+                    // this will only happen if i fuck up lol
+                    error!("why did i receive the message \"{}\"", r.as_str());
                     bail!("how did this happen lol");
                 }
             }
