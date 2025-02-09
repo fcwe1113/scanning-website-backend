@@ -5,6 +5,7 @@ use anyhow::{bail, Error};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
 use tokio::net::TcpStream;
+use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::accept_async;
 use tungstenite::{Message, Utf8Bytes};
 use crate::connection_info::ConnectionInfo;
@@ -16,7 +17,7 @@ use crate::token_exchange::token_exchange_handler;
 // rust explicitly bans this unless ur willing to jump thru the hoops
 // which im not
 // for now every change to the list requires a mutex lock
-pub(crate) async fn client_connection(stream: TcpStream, addr: SocketAddr, token: String, mut token_exchanged: bool, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) {
+pub(crate) async fn client_connection(stream: TlsStream<TcpStream>, addr: SocketAddr, token: String, mut token_exchanged: bool, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) {
     // note we dont want to lock the list and pass the list in by ref
     // do that and only one client can access the list until it dcs
 
@@ -52,18 +53,21 @@ pub(crate) async fn client_connection(stream: TcpStream, addr: SocketAddr, token
             Ok(Message::Text(text)) => {
                 debug!("Message received from {}: {}", addr, text);
 
-                // ideally a status check should be done per set time period confirming client status to prevent hacker fuckery
-                // and both sides should move in lock step anyways to prevent bugs
-                // keep in mind that both client and server should have the same values and vars except for the one that they are actively changing
+
+
 
                 // first digit denotes client screen status
                 // after reading the first digit get rid of it and pass the rest of the message into the relevant function
                 // messages sent from both ends should follow a similar format (at least for the first few chars)
 
+                // status check would be done per set time period (2 minutes or something) confirming client status to prevent hacker fuckery
                 // each screen status (except 0) have a list of items used to do status checks
+                // in addition to that also a nonce which is a randomly generated string that every message sent up has to attach
                 // which is just the client pinging the server every set timeframe with the list of items
-                // if the server does not receive it in a set timeframe or the client's check items are wrong
+                // if the server does not receive it in a set timeframe or the client's check items/nonce are wrong
                 // the server closes the connection and the client displays an error and stops functionality
+                // every status check also updates the clients nonce by replacing it with a new one by the server
+                // keep in mind that both client and server should have the same values and vars except for the one that they are actively changing
 
                 // *** denotes client side tasks
                 // 0 = token exchange

@@ -2,6 +2,7 @@ mod connection_info;
 mod token_exchange;
 mod screen_state;
 mod client_connection;
+mod tls_cert_gen;
 
 use std::{
     string::String,
@@ -14,28 +15,32 @@ use crate::connection_info::ConnectionInfo;
 use crate::token_exchange::*;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
+use tokio_rustls::{rustls, TlsAcceptor};
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use futures::{StreamExt, SinkExt};
 use clap::builder::Str;
 use log::{info, error, debug};
-use rand::{rng, Rng};
+use rand::{rng, Rng, SeedableRng, RngCore, distr::Alphanumeric};
 use tracing_subscriber::{util::SubscriberInitExt, prelude::__tracing_subscriber_SubscriberExt};
 use tungstenite::Utf8Bytes;
 use unicode_segmentation::UnicodeSegmentation;
-use rand::{SeedableRng, RngCore};
-use rand::distr::Alphanumeric;
 use rand_chacha::ChaCha20Rng;
+use warp::Filter;
 use crate::client_connection::client_connection;
 use crate::screen_state::ScreenState;
+use crate::tls_cert_gen::generate_self_signed_cert;
+// boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
 
 #[tokio::main]
 async fn main() {
 
-    let mut rng = ChaCha20Rng::from_os_rng();
-
-    for i in 0..10 {
-        // salt generator for account creation
-        println!("{}", (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>());
-    }
+    // let mut rng = ChaCha20Rng::from_os_rng();
+    //
+    // for i in 0..10 {
+    //     // salt generator for account creation
+    //     println!("{}", (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>());
+    // }
 
     // Initialize the logger
     tracing_subscriber::registry()
@@ -47,6 +52,14 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    // let current_dir = std::env::current_dir().expect("failed to read current directory");
+    // debug!("current directory: {:?}", current_dir);
+    // let routes = warp::get().and(warp::fs::dir(current_dir));warp::serve(routes)
+    //     .tls()
+    //     .cert_path("cert.pem")
+    //     .key_path("key.rsa")
+    //     .run(([0, 0, 0, 0], 9231)).await;
+
     // make the master list of all current active connections
     let mut connections_list: Vec<ConnectionInfo> = Vec::new();
     // slap a lock on that guy bc guy is popular and getting harassed by multiple ppl at once is bad
@@ -56,47 +69,71 @@ async fn main() {
     let addr = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8080".to_string());
     let addr: SocketAddr = addr.parse().expect("Invalid address");
 
+    // generate the cert and the private key
+    let (cert, private_key) = generate_self_signed_cert().unwrap();
+
+    // set up TLS acceptor
+    // currently the cert we self made was not trusted by the client and bc we didnt handle the error here the server dies
+    // https://letsencrypt.org/getting-started/ provides free valid certs
+    // and https://docs.rs/acme2/latest/acme2/ provides the way to get that cert in program
+    // todo use that instead of the self made one
+    // we can still keep it as a plan b if the valid cert is unavailable somehow
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![CertificateDer::from(cert.to_der().unwrap())], PrivateKeyDer::try_from(private_key.private_key_to_der().unwrap()).unwrap()).unwrap();
+    let acceptor = TlsAcceptor::from(Arc::new(config));
+
     // Create the TCP listener
     let listener = TcpListener::bind(&addr).await.expect("Failed to bind");
 
     info!("Listening on: {}", addr);
 
     // waits for an incoming connection and runs the loop if there is one coming in
-    while let Ok((stream, _)) = listener.accept().await {
-        let addr = stream.peer_addr().unwrap();
-        let mut is_duplicate = false;
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                let addr = stream.peer_addr().unwrap();
+                let acceptor = acceptor.clone();
+                let mut tls_stream = acceptor.accept(stream).await.unwrap();
 
-        // for some reason react intentionally opens the same websocket twice with one new websocket object init
-        // we loop thru the connections list and if the ip is already on the list we drop the request
-        // AAAANNNNDDDD it doesnt work as react connects in with different port for each connection
-        // AAAANNNNDDDD it just uses the first connection and ignores the second connection memory leak style
-        // todo0
-        // either disable this dickish behaviour in react or somehow find a way to disconnect the redundant connection here
-        // disabled it on react by disabling strict mode yaaaaaaaaaaaaaaayyyyyy
+                let mut is_duplicate = false;
 
-        {
-            // this code here is surrounded with {} bc we want to ensure the entire code block here locks up
-            // the list and prevent anything else from interfering and escapes the duplicate check
-            // effectively this ensures one connection gets established before the next new client can start the
-            // connection process
-            let mut temp_connections_list = &mut connections_list_lock.lock().unwrap();
-            for connections in temp_connections_list.iter() {
-                if connections.addr == addr {
-                    is_duplicate = true;
-                    break;
+                // for some reason react intentionally opens the same websocket twice with one new websocket object init
+                // we loop thru the connections list and if the ip is already on the list we drop the request
+                // AAAANNNNDDDD it doesnt work as react connects in with different port for each connection
+                // AAAANNNNDDDD it just uses the first connection and ignores the second connection memory leak style
+                // todo0
+                // either disable this dickish behaviour in react or somehow find a way to disconnect the redundant connection here
+                // disabled it on react by disabling strict mode yaaaaaaaaaaaaaaayyyyyy
+
+                {
+                    // this code here is surrounded with {} bc we want to ensure the entire code block here locks up
+                    // the list and prevent anything else from interfering and escapes the duplicate check
+                    // effectively this ensures one connection gets established before the next new client can start the
+                    // connection process
+                    let mut temp_connections_list = &mut connections_list_lock.lock().unwrap();
+                    for connections in temp_connections_list.iter() {
+                        if connections.addr == addr {
+                            is_duplicate = true;
+                            break;
+                        }
+                    }
+
+                    if !is_duplicate {
+                        temp_connections_list.push(ConnectionInfo::new(addr, String::from("-1")));
+                        info!("New connection from: {}", addr);
+                        debug!("{:#?}", temp_connections_list);
+                        // Spawn a new task for each connection
+                        // note this line makes a new thread for each connection
+                        // 0a generate valid token
+                        tokio::spawn(client_connection(tls_stream, addr, token_gen(&*temp_connections_list), false, connections_list_lock.clone()));
+                    } else {
+                        info!("duplicate connection request from: {}, dropping", addr);
+                    }
                 }
-            }
-
-            if !is_duplicate {
-                temp_connections_list.push(ConnectionInfo::new(addr, String::from("-1")));
-                info!("New connection from: {}", addr);
-                debug!("{:#?}", temp_connections_list);
-                // Spawn a new task for each connection
-                // note this line makes a new thread for each connection
-                // 0a generate valid token
-                tokio::spawn(client_connection(stream, addr, token_gen(&*temp_connections_list), false, connections_list_lock.clone()));
-            } else {
-                info!("duplicate connection request from: {}, dropping", addr);
+            },
+            Err(e) => {
+                error!("client TCP accept error: {}", e);
             }
         }
     }

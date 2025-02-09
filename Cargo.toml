@@ -6,11 +6,9 @@ edition = "2021"
 [dependencies]
 anyhow = { version = "1" }
 async-channel = { version = "2.1" }
-axum = { version = "0.8.1", features = ["tokio", "ws"] }
 clap = { version = "4.4", features = ["derive"] }
 futures-util = { version = "0.3" }
 tokio = { version = "1.0", features = ["full"] }
-tower-http = { version = "0.6.2", features = ["fs", "trace"] }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio-tungstenite = "0.26.1"
@@ -22,3 +20,7 @@ rand = "0.9.0"
 unicode-segmentation = "1.12.0"
 rand_chacha = "0.9.0"
 hex = "0.4.3"
+warp = { version = "0.3.7", features = ["tls"] }
+tokio-rustls = "0.26.1"
+rustls = "0.23.22"
+openssl = { version = "0.10.70", features = ["vendored"] }
