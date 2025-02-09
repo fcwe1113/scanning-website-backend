@@ -143,7 +143,7 @@ pub(crate) async fn client_connection(stream: TlsStream<TcpStream>, addr: Socket
             Ok(Message::Close(_)) => {
                 let mut list = list_lock.lock().unwrap();
                 for i in 0..list.len() - 1 {
-                    if list[i].addr == addr {
+                    if list[i].client_addr == addr {
                         list.remove(i);
                         info!("disconnected connection with {}", addr);
                         debug!("{:#?}", list);

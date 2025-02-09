@@ -74,7 +74,7 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
                     *token_exchanged = true; // 0c flag
                     debug!("{:#?}", token_exchanged);
                     for connection in list_lock.lock().unwrap().iter_mut() {
-                        if connection.addr == *addr {
+                        if connection.client_addr == *addr {
                             connection.token = token.clone(); // 0c saves on list
                         }
                     }
@@ -82,7 +82,7 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
                 }, //0c
                 "moving on" => { // 0e moving on todo
                     for connection_info in list_lock.lock().unwrap().iter_mut() {
-                        if connection_info.addr == *addr {
+                        if connection_info.client_addr == *addr {
                             connection_info.screen = ScreenState::Start;
                         }
                     }

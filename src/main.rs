@@ -4,33 +4,49 @@ mod screen_state;
 mod client_connection;
 mod tls_cert_gen;
 
+use crate::client_connection::client_connection;
+use crate::connection_info::ConnectionInfo;
+use crate::screen_state::ScreenState;
+use crate::tls_cert_gen::{generate_acme_cert, generate_self_signed_cert};
+use crate::token_exchange::*;
+use acme2::{AccountBuilder, DirectoryBuilder, OrderBuilder};
+use anyhow::Context;
+use axum::http::{Response, StatusCode};
+use axum::response::IntoResponse;
+use axum::routing::{any, get, post};
+use axum::{debug_handler, Router, ServiceExt};
+use axum::handler::Handler;
+use axum_server::Server;
+use clap::builder::Str;
+use futures::{SinkExt, StreamExt};
+use log::{debug, error, info};
+use rand::{distr::Alphanumeric, rng, Rng, RngCore, SeedableRng};
+use rand_chacha::ChaCha20Rng;
+use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
+use std::collections::HashMap;
 use std::{
-    string::String,
     env,
     iter,
     net::SocketAddr,
+    string::String,
     sync::{Arc, Mutex}
 };
-use crate::connection_info::ConnectionInfo;
-use crate::token_exchange::*;
+use axum_server::tls_rustls::RustlsConfig;
+use futures_util::task::SpawnExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use tokio_rustls::{rustls, TlsAcceptor};
-use rustls::pki_types::pem::PemObject;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use futures::{StreamExt, SinkExt};
-use clap::builder::Str;
-use log::{info, error, debug};
-use rand::{rng, Rng, SeedableRng, RngCore, distr::Alphanumeric};
-use tracing_subscriber::{util::SubscriberInitExt, prelude::__tracing_subscriber_SubscriberExt};
+use tokio_rustls_acme::acme::ChallengeType;
+use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
+use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
 use tungstenite::Utf8Bytes;
 use unicode_segmentation::UnicodeSegmentation;
-use rand_chacha::ChaCha20Rng;
 use warp::Filter;
-use crate::client_connection::client_connection;
-use crate::screen_state::ScreenState;
-use crate::tls_cert_gen::generate_self_signed_cert;
+
 // boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
+
+// Get the address to bind to aka which address the server listens to
+const LISTENER_ADDR: &str = "0.0.0.0:8080";
 
 #[tokio::main]
 async fn main() {
@@ -65,11 +81,8 @@ async fn main() {
     // slap a lock on that guy bc guy is popular and getting harassed by multiple ppl at once is bad
     let connections_list_lock = Arc::new(Mutex::new(connections_list));
 
-    // Get the address to bind to aka which address the server listens to
-    let addr = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8080".to_string());
-    let addr: SocketAddr = addr.parse().expect("Invalid address");
-
     // generate the cert and the private key
+    // let (b) = generate_acme_cert().await.unwrap();
     let (cert, private_key) = generate_self_signed_cert().unwrap();
 
     // set up TLS acceptor
@@ -84,15 +97,15 @@ async fn main() {
     let acceptor = TlsAcceptor::from(Arc::new(config));
 
     // Create the TCP listener
-    let listener = TcpListener::bind(&addr).await.expect("Failed to bind");
+    let listener = TcpListener::bind(&LISTENER_ADDR).await.expect("Failed to bind");
 
-    info!("Listening on: {}", addr);
+    info!("Listening on: {}", LISTENER_ADDR);
 
     // waits for an incoming connection and runs the loop if there is one coming in
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                let addr = stream.peer_addr().unwrap();
+                let incoming_addr = stream.peer_addr().unwrap();
                 let acceptor = acceptor.clone();
                 let mut tls_stream = acceptor.accept(stream).await.unwrap();
 
@@ -113,22 +126,23 @@ async fn main() {
                     // connection process
                     let mut temp_connections_list = &mut connections_list_lock.lock().unwrap();
                     for connections in temp_connections_list.iter() {
-                        if connections.addr == addr {
+                        if connections.client_addr == incoming_addr {
                             is_duplicate = true;
                             break;
                         }
                     }
 
                     if !is_duplicate {
-                        temp_connections_list.push(ConnectionInfo::new(addr, String::from("-1")));
-                        info!("New connection from: {}", addr);
+                        temp_connections_list.push(ConnectionInfo::new(incoming_addr, String::from("-1")));
+                        info!("New connection from: {}", incoming_addr);
                         debug!("{:#?}", temp_connections_list);
                         // Spawn a new task for each connection
                         // note this line makes a new thread for each connection
                         // 0a generate valid token
-                        tokio::spawn(client_connection(tls_stream, addr, token_gen(&*temp_connections_list), false, connections_list_lock.clone()));
+                        tokio::spawn(client_connection(tls_stream, incoming_addr, token_gen(&*temp_connections_list), false, connections_list_lock.clone()));
+                        // return Response::new(());
                     } else {
-                        info!("duplicate connection request from: {}, dropping", addr);
+                        info!("duplicate connection request from: {}, dropping", incoming_addr);
                     }
                 }
             },
