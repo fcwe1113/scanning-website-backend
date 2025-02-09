@@ -17,7 +17,7 @@ use crate::token_exchange::token_exchange_handler;
 // rust explicitly bans this unless ur willing to jump thru the hoops
 // which im not
 // for now every change to the list requires a mutex lock
-pub(crate) async fn client_connection(stream: TlsStream<TcpStream>, addr: SocketAddr, token: String, mut token_exchanged: bool, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) {
+pub(crate) async fn client_connection(stream: TcpStream, addr: SocketAddr, token: String, mut token_exchanged: bool, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) {
     // note we dont want to lock the list and pass the list in by ref
     // do that and only one client can access the list until it dcs
 
@@ -52,9 +52,6 @@ pub(crate) async fn client_connection(stream: TlsStream<TcpStream>, addr: Socket
         match msg {
             Ok(Message::Text(text)) => {
                 debug!("Message received from {}: {}", addr, text);
-
-
-
 
                 // first digit denotes client screen status
                 // after reading the first digit get rid of it and pass the rest of the message into the relevant function

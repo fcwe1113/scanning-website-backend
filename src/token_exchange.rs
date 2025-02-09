@@ -27,7 +27,7 @@ use crate::screen_state::ScreenState;
     // f. client moves on for real***
     // while the client is waiting for the token exchange ack it can show a loading wheel or something idk
 
-pub(crate) async fn token_exchange_handler(msg: String, sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>, token_exchanged: &mut bool, addr: &SocketAddr, token: &String, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) -> Result<(), Error>{
+pub(crate) async fn token_exchange_handler(msg: String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>, token_exchanged: &mut bool, addr: &SocketAddr, token: &String, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) -> Result<(), Error>{
 
     // rust does not allow &mut var to be passed into funcs as &var so we cop out and clone the guy
     // we only needed to read the value anyways
@@ -41,7 +41,7 @@ pub(crate) async fn token_exchange_handler(msg: String, sender: &mut SplitSink<W
     Ok(())
 }
 
-async fn token_exchange(msg: String, token: &String, sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>, addr: &SocketAddr, flag: &bool) -> Result<String, Error> {
+async fn token_exchange(msg: String, token: &String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>, addr: &SocketAddr, flag: &bool) -> Result<String, Error> {
 
     if (msg == "NEXT") {
         // debug!("{}", flag.to_string());

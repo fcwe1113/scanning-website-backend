@@ -33,11 +33,11 @@ use std::{
 };
 use axum_server::tls_rustls::RustlsConfig;
 use futures_util::task::SpawnExt;
+use rustls::crypto::CryptoProvider;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use tokio_rustls::{rustls, TlsAcceptor};
 use tokio_rustls_acme::acme::ChallengeType;
-use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
 use tungstenite::Utf8Bytes;
 use unicode_segmentation::UnicodeSegmentation;
@@ -83,7 +83,13 @@ async fn main() {
 
     // generate the cert and the private key
     // let (b) = generate_acme_cert().await.unwrap();
-    let (cert, private_key) = generate_self_signed_cert().unwrap();
+
+    // let (mut cert, private_key) = generate_self_signed_cert().unwrap();
+    // let cert = cert.to_der().unwrap();
+    // let private_key = private_key.private_key_to_der().unwrap();
+
+    let cert = CertificateDer::from_pem_file("localhost.crt").unwrap();
+    let private_key = PrivateKeyDer::from_pem_file("localhost.key").unwrap();
 
     // set up TLS acceptor
     // currently the cert we self made was not trusted by the client and bc we didnt handle the error here the server dies
@@ -91,9 +97,10 @@ async fn main() {
     // and https://docs.rs/acme2/latest/acme2/ provides the way to get that cert in program
     // todo use that instead of the self made one
     // we can still keep it as a plan b if the valid cert is unavailable somehow
+    rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
-        .with_single_cert(vec![CertificateDer::from(cert.to_der().unwrap())], PrivateKeyDer::try_from(private_key.private_key_to_der().unwrap()).unwrap()).unwrap();
+        .with_single_cert(vec![CertificateDer::from(cert)], PrivateKeyDer::try_from(private_key).unwrap()).unwrap();
     let acceptor = TlsAcceptor::from(Arc::new(config));
 
     // Create the TCP listener
@@ -106,8 +113,15 @@ async fn main() {
         match listener.accept().await {
             Ok((stream, _)) => {
                 let incoming_addr = stream.peer_addr().unwrap();
-                let acceptor = acceptor.clone();
-                let mut tls_stream = acceptor.accept(stream).await.unwrap();
+
+                // let acceptor = acceptor.clone();
+                // let mut tls_stream = acceptor.accept(stream).await.unwrap();
+
+                // NOTE:
+                // this TLS adventure is a dead end as to even attempt to make a valid cert
+                // you need a domain name for the backend which i dont and very likely wont have ever
+                // source: https://users.rust-lang.org/t/ed25519-and-rustls-tls-client-server/80133/4
+                // at this current stage there is no point in continuing this further
 
                 let mut is_duplicate = false;
 
@@ -139,7 +153,7 @@ async fn main() {
                         // Spawn a new task for each connection
                         // note this line makes a new thread for each connection
                         // 0a generate valid token
-                        tokio::spawn(client_connection(tls_stream, incoming_addr, token_gen(&*temp_connections_list), false, connections_list_lock.clone()));
+                        tokio::spawn(client_connection(stream, incoming_addr, token_gen(&*temp_connections_list), false, connections_list_lock.clone()));
                         // return Response::new(());
                     } else {
                         info!("duplicate connection request from: {}, dropping", incoming_addr);
