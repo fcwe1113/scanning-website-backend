@@ -31,6 +31,7 @@ use std::{
     string::String,
     sync::{Arc, Mutex}
 };
+use std::time::Duration;
 use axum_server::tls_rustls::RustlsConfig;
 use futures_util::task::SpawnExt;
 use rustls::crypto::CryptoProvider;
@@ -47,6 +48,7 @@ use warp::Filter;
 
 // Get the address to bind to aka which address the server listens to
 const LISTENER_ADDR: &str = "0.0.0.0:8080";
+const STATUS_CHECK_INTERVAL: Duration = Duration::from_secs(120);
 
 #[tokio::main]
 async fn main() {
@@ -149,11 +151,11 @@ async fn main() {
                     if !is_duplicate {
                         temp_connections_list.push(ConnectionInfo::new(incoming_addr, String::from("-1")));
                         info!("New connection from: {}", incoming_addr);
-                        debug!("{:#?}", temp_connections_list);
+                        // debug!("{:#?}", temp_connections_list);
                         // Spawn a new task for each connection
                         // note this line makes a new thread for each connection
                         // 0a generate valid token
-                        tokio::spawn(client_connection(stream, incoming_addr, token_gen(&*temp_connections_list), false, connections_list_lock.clone()));
+                        tokio::spawn(client_connection(stream, incoming_addr, token_gen(&*temp_connections_list), false, String::from("-1"), connections_list_lock.clone()));
                         // return Response::new(());
                     } else {
                         info!("duplicate connection request from: {}, dropping", incoming_addr);

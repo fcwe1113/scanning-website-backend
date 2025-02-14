@@ -2818,6 +2818,7 @@ dependencies = [
  "async-channel",
  "axum",
  "axum-server",
+ "base64 0.21.7",
  "clap",
  "env_logger",
  "futures",

@@ -30,3 +30,4 @@ tokio-stream = { version = "0.1.17", features = ["net"] }
 axum = { version =  "0.8.1", features = ["macros"] }
 axum-server = { version =  "0.7.1", features = ["tls-rustls"] }
 ring = "0.17.8"
+base64 = "0.21.7"
