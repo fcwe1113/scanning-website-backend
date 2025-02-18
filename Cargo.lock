@@ -445,7 +445,9 @@ checksum = "7e36cc9d416881d2e24f9a963be5fb1cd90966419ac844274161d10488b3e825"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
+ "js-sys",
  "num-traits",
+ "wasm-bindgen",
  "windows-targets 0.52.6",
 ]
 
@@ -2467,6 +2469,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "timer"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31d42176308937165701f50638db1c31586f183f1aab416268216577aec7306b"
+dependencies = [
+ "chrono",
+]
+
+[[package]]
 name = "tinystr"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2819,6 +2830,7 @@ dependencies = [
  "axum",
  "axum-server",
  "base64 0.21.7",
+ "chrono",
  "clap",
  "env_logger",
  "futures",
@@ -2830,6 +2842,7 @@ dependencies = [
  "rand_chacha 0.9.0",
  "ring",
  "rustls 0.23.22",
+ "timer",
  "tokio",
  "tokio-rustls 0.26.1",
  "tokio-rustls-acme",

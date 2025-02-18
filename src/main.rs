@@ -3,6 +3,7 @@ mod token_exchange;
 mod screen_state;
 mod client_connection;
 mod tls_cert_gen;
+mod login_screen;
 
 use crate::client_connection::client_connection;
 use crate::connection_info::ConnectionInfo;
@@ -33,8 +34,10 @@ use std::{
 };
 use std::time::Duration;
 use axum_server::tls_rustls::RustlsConfig;
+use chrono::Utc;
 use futures_util::task::SpawnExt;
 use rustls::crypto::CryptoProvider;
+use timer::Timer;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use tokio_rustls::{rustls, TlsAcceptor};
@@ -155,7 +158,15 @@ async fn main() {
                         // Spawn a new task for each connection
                         // note this line makes a new thread for each connection
                         // 0a generate valid token
-                        tokio::spawn(client_connection(stream, incoming_addr, token_gen(&*temp_connections_list), false, String::from("-1"), connections_list_lock.clone()));
+                        tokio::spawn(client_connection(
+                            stream,
+                            incoming_addr,
+                            token_gen(&*temp_connections_list),
+                            false,
+                            String::from("-1"),
+                            Utc::now(),
+                            Timer::new(),
+                            connections_list_lock.clone()));
                         // return Response::new(());
                     } else {
                         info!("duplicate connection request from: {}, dropping", incoming_addr);

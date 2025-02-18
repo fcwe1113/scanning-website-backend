@@ -18,7 +18,10 @@ use rand::Rng;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
 use ring::aead::quic::AES_256;
+use chrono::{DateTime, Duration, Utc};
+use timer::Timer;
 use crate::connection_info::ConnectionInfo;
+use crate::login_screen::start_screen_handler;
 use crate::screen_state::ScreenState;
 use crate::token_exchange::token_exchange_handler;
 
@@ -33,6 +36,8 @@ pub(crate) async fn client_connection(
     token: String,
     mut token_exchanged: bool,
     mut nonce: String, // nonce will be 20 in length
+    mut last_check: DateTime<Utc>,
+    timer: Timer,
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>
 ) {
     // note we dont want to lock the list and pass the list in by ref
@@ -77,6 +82,10 @@ pub(crate) async fn client_connection(
     } else {
         info!("token sent to {}: {}", addr, &token);
     }
+
+    // set status check timer
+    // println!("timer set");
+    timer.schedule_with_delay(Duration::minutes(3), move || {return;});
 
     // Handle incoming messages
     while let Some(msg) = receiver.next().await {
@@ -178,7 +187,15 @@ pub(crate) async fn client_connection(
                     '0' => {
 
                         // error handling cant be packed into the function :(
-                        if let Err(e) = token_exchange_handler(msg.clone(), &mut sender, &mut token_exchanged, &addr, &token, &mut nonce, list_lock.clone()).await{
+                        if let Err(e) = token_exchange_handler(
+                            msg.clone(),
+                            &mut sender,
+                            &mut token_exchanged,
+                            &addr,
+                            &token,
+                            &mut nonce,
+                            list_lock.clone()
+                        ).await{
                             // for now every error the server gets would lead to disconnect
                             // maybe can implement a tier system later where some lead to retries
                             // and others lead to straight disconnects
@@ -190,7 +207,18 @@ pub(crate) async fn client_connection(
                         // let result = token_exchange(msg, &token, &mut sender, &addr, &token_exchanged);
 
                     },
-                    '1' => info!("passing \"{}\" into start screen func", msg),
+                    '1' => { if let Err(e) = start_screen_handler(
+                        msg.clone(),
+                        &mut sender,
+                        &addr,
+                        &token,
+                        &mut nonce,
+                        &timer,
+                        list_lock.clone()
+                    ).await{
+                        error!("{}", e);
+                        break;
+                    } },
                     _ => { error!("lol") }
                 }
 
