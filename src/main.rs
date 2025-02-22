@@ -12,31 +12,33 @@ use crate::tls_cert_gen::{generate_acme_cert, generate_self_signed_cert};
 use crate::token_exchange::*;
 use acme2::{AccountBuilder, DirectoryBuilder, OrderBuilder};
 use anyhow::Context;
-use axum::http::{Response, StatusCode};
-use axum::response::IntoResponse;
-use axum::routing::{any, get, post};
-use axum::{debug_handler, Router, ServiceExt};
-use axum::handler::Handler;
-use axum_server::Server;
+use axum::{
+    http::{Response, StatusCode},
+    response::IntoResponse,
+    routing::{any, get, post},
+    debug_handler,
+    Router,
+    ServiceExt,
+    handler::Handler
+};
+use axum_server::{Server, tls_rustls::RustlsConfig};
 use clap::builder::Str;
 use futures::{SinkExt, StreamExt};
 use log::{debug, error, info};
-use rand::{distr::Alphanumeric, rng, Rng, RngCore, SeedableRng};
+use rand::{
+    distr::Alphanumeric,
+    rng,
+    Rng,
+    RngCore,
+    SeedableRng};
 use rand_chacha::ChaCha20Rng;
-use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
-use std::collections::HashMap;
-use std::{
-    env,
-    iter,
-    net::SocketAddr,
-    string::String,
-    sync::{Arc, Mutex}
+use rustls::{
+    pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
+    crypto::CryptoProvider
 };
-use std::time::Duration;
-use axum_server::tls_rustls::RustlsConfig;
+use std::{env, iter, net::SocketAddr, string::String, sync::{Arc, Mutex}, time::Duration, collections::HashMap, fs, thread};
 use chrono::Utc;
 use futures_util::task::SpawnExt;
-use rustls::crypto::CryptoProvider;
 use timer::Timer;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
@@ -46,12 +48,20 @@ use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::Subs
 use tungstenite::Utf8Bytes;
 use unicode_segmentation::UnicodeSegmentation;
 use warp::Filter;
+use rusqlite::{Connection, Result};
 
 // boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
 
 // Get the address to bind to aka which address the server listens to
 const LISTENER_ADDR: &str = "0.0.0.0:8080";
-const STATUS_CHECK_INTERVAL: Duration = Duration::from_secs(120);
+
+// client should send a status check every 2 minutes, the 3 minutes here is to account of ping and other crap
+const STATUS_CHECK_INTERVAL: Duration = Duration::from_secs(180);
+
+struct test {
+    id: String,
+    name: String
+}
 
 #[tokio::main]
 async fn main() {
@@ -86,6 +96,10 @@ async fn main() {
     // slap a lock on that guy bc guy is popular and getting harassed by multiple ppl at once is bad
     let connections_list_lock = Arc::new(Mutex::new(connections_list));
 
+    // EVERYTHING FROM HERE IS SKIPPED
+    // EVERYTHING FROM HERE IS SKIPPED
+    // EVERYTHING FROM HERE IS SKIPPED
+
     // generate the cert and the private key
     // let (b) = generate_acme_cert().await.unwrap();
 
@@ -107,6 +121,43 @@ async fn main() {
         .with_no_client_auth()
         .with_single_cert(vec![CertificateDer::from(cert)], PrivateKeyDer::try_from(private_key).unwrap()).unwrap();
     let acceptor = TlsAcceptor::from(Arc::new(config));
+
+    // SKIPPING SECTION END
+    // SKIPPING SECTION END
+    // SKIPPING SECTION END
+
+    // db testing
+    // IMPORTANT!!!!!!!!!!!!!!!!!!!
+    // REMEMBER TO USE "begin transaction" BEFORE CHANGING ANYTHING
+    // OR ONE BAD COMMAND MEANS DEATH TO THE DBBBBBBBBBBBBBBBBB
+
+    // make a backup when the server first start
+    // let mut backup_timer = Timer::new();
+    // db_backup(&mut backup_timer);
+    // let backup_scheduler = thread::spawn(|| {
+    //
+    // });
+
+    // this line will try and connect to a db and will cause a panic if it fails to connect to one
+    let mut db = Connection::open("C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system.db").unwrap();
+
+
+    let mut stmt = db.prepare("SELECT id, name FROM test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
+    // to receive select queries from the db the backend will need to prepare spots (aka vars) to store the incoming data
+    // .query_map() is the executor of the command
+    // below we used a self defined struct to store incoming data but theoretically cant u just add the strings together and decipher them the other end?
+    let query_iter = stmt.query_map([], |row| {
+        Ok(test {
+            id: row.get(0).unwrap(),
+            name: row.get(1).unwrap(),
+        })
+    }).unwrap();
+
+    for e in query_iter {
+        let e = e.unwrap();
+        println!("{}|{}", e.id, e.name);
+    }
+
 
     // Create the TCP listener
     let listener = TcpListener::bind(&LISTENER_ADDR).await.expect("Failed to bind");
@@ -180,5 +231,10 @@ async fn main() {
     }
 }
 
+fn db_backup(timer: &mut Timer) {
+    //function to backup the db every 3 hrs of running and refresh the timer
+    fs::copy("C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system.db", "C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system_backup.db");
+    timer.schedule_with_delay(chrono::Duration::hours(3), move || {db_backup(timer)});
+}
 
 

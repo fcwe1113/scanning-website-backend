@@ -2,16 +2,20 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use anyhow::{bail, Error};
 use chrono::Duration;
+use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
-use log::debug;
+use log::{debug, error, info};
+use rand::{Rng};
+use rand_chacha::ChaCha20Rng;
+use rand_chacha::rand_core::SeedableRng;
 use timer::Timer;
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
-use tungstenite::Message;
+use tungstenite::{Message, Utf8Bytes};
 use crate::connection_info::ConnectionInfo;
 
 pub(crate) async fn start_screen_handler(
-    msg: String,
+    msg: &mut String,
     sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     addr: &SocketAddr,
     token: &String,
@@ -41,7 +45,9 @@ pub(crate) async fn start_screen_handler(
 
     // debug!("Starting screen handler received {}", msg);
     // println!("{}", msg.chars().take(5).collect::<String>());
-    let result = start_screen(&mut msg.clone(), sender, addr, &token, nonce, timer, list_lock.clone());
+    // println!("{}", msg);
+    let result = start_screen(msg, sender, addr, &token, nonce, timer, list_lock.clone());
+    info!("{:?}", result.await?);
 
     // if let Err(e) = crate::token_exchange::resolve_result(result, token_exchanged, addr, token, list_lock).await{
     //     bail!(e);
@@ -51,7 +57,7 @@ pub(crate) async fn start_screen_handler(
     
 }
 
-fn start_screen(
+async fn start_screen(
     msg: &mut String,
     sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     addr: &SocketAddr,
@@ -60,12 +66,24 @@ fn start_screen(
     timer: &Timer,
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>
 ) -> Result<String, Error>{
+    // println!("{}", msg);
     if msg.chars().take(6).collect::<String>() == "STATUS" {
         let msg = msg.chars().skip(6).collect::<String>();
         if msg == *token {
             // resets the timer when the status check is received
             debug!("status checked for {}", addr);
-            timer.schedule_with_delay(Duration::minutes(3), move || {return;});
+            timer.schedule_with_delay(Duration::minutes(3), move || { return; });
+            // generate a new nonce and send it over
+            let mut rng = ChaCha20Rng::from_os_rng();
+            *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
+            if let Err(e) = sender.send(Message::from(format!("STATUS{}", nonce))).await {
+                bail!("failed to send nonce to {}: {}", addr, e);
+            } else {
+                info!("updated nonce sent to {}: {}", addr, nonce);
+                let _ = Ok::<String, String>("nonce updated".to_string());
+            }
+        } else {
+            bail!("invalid status check for {}", addr);
         }
     } else {
         bail!("login screen received invalid message from {}: {}", addr, msg);

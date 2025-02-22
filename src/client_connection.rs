@@ -181,8 +181,9 @@ pub(crate) async fn client_connection(
 
                 // get the rest of the string
                 let msg = text.chars().next().map(|c| &text[c.len_utf8()..]).unwrap().to_string();
-                // debug!("msg: {} {}", msg, token);
                 // no need to lock anything used here as no message that can interfere with each other should interfere with each other
+
+                // println!("{}, {}", first_char, msg);
                 match first_char {
                     '0' => {
 
@@ -208,7 +209,7 @@ pub(crate) async fn client_connection(
 
                     },
                     '1' => { if let Err(e) = start_screen_handler(
-                        msg.clone(),
+                        &mut msg.clone(),
                         &mut sender,
                         &addr,
                         &token,
