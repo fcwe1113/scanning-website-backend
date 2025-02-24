@@ -8,11 +8,20 @@ use log::{debug, error, info};
 use rand::{Rng};
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
+use rusqlite::Connection;
 use timer::Timer;
 use tokio::net::TcpStream;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::{Message, Utf8Bytes};
 use crate::connection_info::ConnectionInfo;
+
+struct password{
+    // since the db wont store passwords in plain text but in salted hash the way to check is the password is correct would be to:
+    // get the salt and salted hash the user input password
+    // see if it matches
+    hash: String,
+    salt: String,
+}
 
 pub(crate) async fn start_screen_handler(
     msg: &mut String,
@@ -21,7 +30,8 @@ pub(crate) async fn start_screen_handler(
     token: &String,
     nonce: &mut String,
     timer: &Timer,
-    list_lock: Arc<Mutex<Vec<ConnectionInfo>>>
+    list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
+    db: &mut Connection
 ) -> Result<(), Error>{
 
     // 1 = start screen
@@ -46,7 +56,7 @@ pub(crate) async fn start_screen_handler(
     // debug!("Starting screen handler received {}", msg);
     // println!("{}", msg.chars().take(5).collect::<String>());
     // println!("{}", msg);
-    let result = start_screen(msg, sender, addr, &token, nonce, timer, list_lock.clone());
+    let result = start_screen(msg, sender, addr, &token, nonce, timer, db, list_lock.clone());
     info!("{:?}", result.await?);
 
     // if let Err(e) = crate::token_exchange::resolve_result(result, token_exchanged, addr, token, list_lock).await{
@@ -64,6 +74,7 @@ async fn start_screen(
     token: &String,
     nonce: &mut String,
     timer: &Timer,
+    db: &mut Connection,
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>
 ) -> Result<String, Error>{
     // println!("{}", msg);
@@ -85,6 +96,13 @@ async fn start_screen(
         } else {
             bail!("invalid status check for {}", addr);
         }
+    } else if msg.chars().take(5).collect::<String>() == "LOGIN" {
+        let msg = msg.chars().skip(5).collect::<String>();
+        let space_index = msg.find(" ").unwrap();
+        let username = msg.chars().take(space_index).collect::<String>();
+        let password = msg.chars().skip(space_index + 1).collect::<String>();
+        println!("username: {}, password: {}", username, password);
+
     } else {
         bail!("login screen received invalid message from {}: {}", addr, msg);
     }

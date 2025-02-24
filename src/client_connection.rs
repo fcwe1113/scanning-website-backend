@@ -19,6 +19,7 @@ use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
 use ring::aead::quic::AES_256;
 use chrono::{DateTime, Duration, Utc};
+use rusqlite::Connection;
 use timer::Timer;
 use crate::connection_info::ConnectionInfo;
 use crate::login_screen::start_screen_handler;
@@ -38,7 +39,8 @@ pub(crate) async fn client_connection(
     mut nonce: String, // nonce will be 20 in length
     mut last_check: DateTime<Utc>,
     timer: Timer,
-    list_lock: Arc<Mutex<Vec<ConnectionInfo>>>
+    list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
+    mut db: Connection
 ) {
     // note we dont want to lock the list and pass the list in by ref
     // do that and only one client can access the list until it dcs
@@ -215,7 +217,8 @@ pub(crate) async fn client_connection(
                         &token,
                         &mut nonce,
                         &timer,
-                        list_lock.clone()
+                        list_lock.clone(),
+                        &mut db
                     ).await{
                         error!("{}", e);
                         break;

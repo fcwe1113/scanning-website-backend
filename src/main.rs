@@ -36,7 +36,7 @@ use rustls::{
     pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
     crypto::CryptoProvider
 };
-use std::{env, iter, net::SocketAddr, string::String, sync::{Arc, Mutex}, time::Duration, collections::HashMap, fs, thread};
+use std::{env, iter, net::SocketAddr, string::String, sync::{Arc, Mutex}, time::Duration, collections::HashMap, fs, thread, time};
 use chrono::Utc;
 use futures_util::task::SpawnExt;
 use timer::Timer;
@@ -57,6 +57,9 @@ const LISTENER_ADDR: &str = "0.0.0.0:8080";
 
 // client should send a status check every 2 minutes, the 3 minutes here is to account of ping and other crap
 const STATUS_CHECK_INTERVAL: Duration = Duration::from_secs(180);
+
+const DB_LOCATION: &str = "C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system.db";
+const DB_BACKUP_LOCATION: &str = "C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system_backup.db";
 
 struct test {
     id: String,
@@ -139,7 +142,14 @@ async fn main() {
     // });
 
     // this line will try and connect to a db and will cause a panic if it fails to connect to one
-    let mut db = Connection::open("C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system.db").unwrap();
+    let mut db = Connection::open(DB_LOCATION).unwrap();
+    thread::spawn(|| {
+        loop{
+            fs::copy(DB_LOCATION, DB_BACKUP_LOCATION); // yes it panics and crashes if it cant copy, no its not a bug its a feature
+            info!("DB backed up");
+            thread::sleep(Duration::from_secs(10800)); // thats 3 hours worth of seconds
+        }
+    });
 
 
     let mut stmt = db.prepare("SELECT id, name FROM test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
@@ -158,6 +168,16 @@ async fn main() {
         println!("{}|{}", e.id, e.name);
     }
 
+    let mut ans = db.prepare("SELECT name FROM test WHERE id = '01';").unwrap();
+    let ans = ans.query_map([], |row| {Ok(row.get(0).unwrap())}).unwrap();
+    let mut output = String::new();
+    for a in ans {
+        output = a.unwrap();
+    }
+    println!("{}", output);
+    output += &*String::from(output.chars().last().unwrap());
+    // ? are holes you fill into the statement
+    db.execute("UPDATE test SET name = ?1 WHERE id = '01';", [output]).unwrap();
 
     // Create the TCP listener
     let listener = TcpListener::bind(&LISTENER_ADDR).await.expect("Failed to bind");
@@ -217,7 +237,9 @@ async fn main() {
                             String::from("-1"),
                             Utc::now(),
                             Timer::new(),
-                            connections_list_lock.clone()));
+                            connections_list_lock.clone(),
+                            Connection::open(DB_LOCATION).unwrap()
+                        ));
                         // return Response::new(());
                     } else {
                         info!("duplicate connection request from: {}, dropping", incoming_addr);
@@ -229,12 +251,6 @@ async fn main() {
             }
         }
     }
-}
-
-fn db_backup(timer: &mut Timer) {
-    //function to backup the db every 3 hrs of running and refresh the timer
-    fs::copy("C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system.db", "C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system_backup.db");
-    timer.schedule_with_delay(chrono::Duration::hours(3), move || {db_backup(timer)});
 }
 
 
