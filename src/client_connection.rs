@@ -1,13 +1,17 @@
-use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::{
+    future::Future,
+    net::SocketAddr,
+    sync::{Arc}
+};
 use anyhow::{bail, Error};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
-use openssl::encrypt::Decrypter;
-use openssl::pkey::{PKey, Private};
-use openssl::rsa::{Padding, Rsa};
-use tokio::net::TcpStream;
+use openssl::{
+    encrypt::Decrypter,
+    pkey::{PKey, Private},
+    rsa::{Padding, Rsa}
+};
+use tokio::{net::TcpStream, sync::Mutex};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::accept_async;
 use tungstenite::{Message, Utf8Bytes};
@@ -239,7 +243,7 @@ pub(crate) async fn client_connection(
                 }
             }
             Ok(Message::Close(_)) => {
-                let mut list = list_lock.lock().unwrap();
+                let mut list = list_lock.lock().await;
                 for i in 0..list.len() - 1 {
                     if list[i].client_addr == addr {
                         list.remove(i);

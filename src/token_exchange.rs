@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::iter;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use anyhow::{bail, Error};
 use async_channel::Sender;
 use futures_util::SinkExt;
@@ -10,7 +10,7 @@ use log::{debug, error, info};
 use rand::Rng;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::Mutex};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tracing::field::debug;
@@ -102,7 +102,7 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
                     debug!("Token ackked");
                     *token_exchanged = true; // 0f flag
                     debug!("{:#?}", token_exchanged);
-                    for connection in list_lock.lock().unwrap().iter_mut() {
+                    for connection in list_lock.lock().await.iter_mut() {
                         if connection.client_addr == *addr {
                             connection.token = token.clone(); // 0f saves on list
                         }
@@ -110,7 +110,7 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
                     Ok(())
                 },
                 "moving on" => { // 0h moving on todo
-                    for connection_info in list_lock.lock().unwrap().iter_mut() {
+                    for connection_info in list_lock.lock().await.iter_mut() {
                         if connection_info.client_addr == *addr {
                             connection_info.screen = ScreenState::Start;
                         }

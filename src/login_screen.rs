@@ -1,6 +1,9 @@
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use anyhow::{bail, Error};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::password_hash::rand_core::OsRng;
+use argon2::password_hash::SaltString;
 use chrono::Duration;
 use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
@@ -8,12 +11,14 @@ use log::{debug, error, info};
 use rand::{Rng};
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
-use rusqlite::Connection;
 use timer::Timer;
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::Mutex, task};
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::{Message, Utf8Bytes};
+use rusqlite::Connection;
+use rusqlite::fallible_iterator::FallibleIterator;
 use crate::connection_info::ConnectionInfo;
+use crate::test;
 
 struct password{
     // since the db wont store passwords in plain text but in salted hash the way to check is the password is correct would be to:
@@ -78,6 +83,7 @@ async fn start_screen(
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>
 ) -> Result<String, Error>{
     // println!("{}", msg);
+    // println!("{} {}", msg.chars().take(5).collect::<String>(), msg.chars().take(5).collect::<String>() == "LOGIN");
     if msg.chars().take(6).collect::<String>() == "STATUS" {
         let msg = msg.chars().skip(6).collect::<String>();
         if msg == *token {
@@ -97,11 +103,58 @@ async fn start_screen(
             bail!("invalid status check for {}", addr);
         }
     } else if msg.chars().take(5).collect::<String>() == "LOGIN" {
+        // println!("hi");
+        // println!("{}", msg);
         let msg = msg.chars().skip(5).collect::<String>();
+        // println!("{}", msg);
         let space_index = msg.find(" ").unwrap();
         let username = msg.chars().take(space_index).collect::<String>();
-        let password = msg.chars().skip(space_index + 1).collect::<String>();
+        let mut password = msg.chars().skip(space_index + 1).collect::<String>();
         println!("username: {}, password: {}", username, password);
+
+        // use task::block in place for sql code to prevent errors
+        let mut result = task::block_in_place(|| {
+            let mut stmt = db.prepare("SELECT password, salt FROM Users WHERE username = ?1;").unwrap();
+            let query_iter = stmt.query_map([username], |row| {
+                Ok(password {
+                    hash: row.get(0).unwrap(),
+                    salt: row.get(1).unwrap(),
+                })
+            }).unwrap();
+            return query_iter.collect::<Result<Vec<_>, _>>().unwrap();
+        });
+
+        let mut error = false;
+        if !result.is_empty() {
+            let password = &*password.into_bytes();
+            let input_password = password.clone();
+            let correct_password = result[0].hash.clone();
+            let salt = result[0].salt.clone();
+            println!("{}", SaltString::generate(&mut OsRng));
+            let argon2 = Argon2::default();
+            println!("argon2: {}", argon2.hash_password(password, SaltString::from_b64(&*salt).unwrap().as_salt()).unwrap().to_string());
+            let password = PasswordHash::new(&*argon2.hash_password(password, SaltString::from_b64(&*salt).unwrap().as_salt()).unwrap().to_string()).unwrap();
+            match argon2.verify_password(input_password, &PasswordHash::new(&*result[0].hash).unwrap()) {
+                Ok(()) => println!("successfully verified password"),
+                _ => {
+                    error = true;
+                    println!("failed to verify password");
+                }
+            }
+
+        } else {
+            error = true;
+        }
+
+
+
+        if error {
+            if let Err(e) = sender.send(Message::from("1FAIL")).await {
+                bail!("failed to send login error to {}: {}", addr, e);
+            } else {
+                info!("login error sent to {}", addr);
+            }
+        }
 
     } else {
         bail!("login screen received invalid message from {}: {}", addr, msg);

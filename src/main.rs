@@ -36,11 +36,14 @@ use rustls::{
     pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
     crypto::CryptoProvider
 };
-use std::{env, iter, net::SocketAddr, string::String, sync::{Arc, Mutex}, time::Duration, collections::HashMap, fs, thread, time};
+use std::{env, iter, net::SocketAddr, string::String, sync::Arc, time::Duration, collections::HashMap, fs, thread, time};
 use chrono::Utc;
 use futures_util::task::SpawnExt;
 use timer::Timer;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::Mutex
+};
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use tokio_rustls::{rustls, TlsAcceptor};
 use tokio_rustls_acme::acme::ChallengeType;
@@ -214,7 +217,7 @@ async fn main() {
                     // the list and prevent anything else from interfering and escapes the duplicate check
                     // effectively this ensures one connection gets established before the next new client can start the
                     // connection process
-                    let mut temp_connections_list = &mut connections_list_lock.lock().unwrap();
+                    let mut temp_connections_list = &mut connections_list_lock.lock().await;
                     for connections in temp_connections_list.iter() {
                         if connections.client_addr == incoming_addr {
                             is_duplicate = true;
