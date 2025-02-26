@@ -238,7 +238,7 @@ async fn main() {
                             token_gen(&*temp_connections_list),
                             false,
                             String::from("-1"),
-                            Utc::now(),
+                            String::new(),
                             Timer::new(),
                             connections_list_lock.clone(),
                             Connection::open(DB_LOCATION).unwrap()

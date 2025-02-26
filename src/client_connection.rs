@@ -1,7 +1,7 @@
 use std::{
     future::Future,
     net::SocketAddr,
-    sync::{Arc}
+    sync::Arc
 };
 use anyhow::{bail, Error};
 use futures_util::{SinkExt, StreamExt};
@@ -41,7 +41,7 @@ pub(crate) async fn client_connection(
     token: String,
     mut token_exchanged: bool,
     mut nonce: String, // nonce will be 20 in length
-    mut last_check: DateTime<Utc>,
+    mut username: String,
     timer: Timer,
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
     mut db: Connection
@@ -220,6 +220,7 @@ pub(crate) async fn client_connection(
                         &addr,
                         &token,
                         &mut nonce,
+                        &mut username,
                         &timer,
                         list_lock.clone(),
                         &mut db
