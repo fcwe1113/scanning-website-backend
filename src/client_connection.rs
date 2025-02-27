@@ -28,6 +28,7 @@ use timer::Timer;
 use crate::connection_info::ConnectionInfo;
 use crate::login_screen::start_screen_handler;
 use crate::screen_state::ScreenState;
+use crate::sign_up::sign_up_handler;
 use crate::token_exchange::token_exchange_handler;
 
 // note:
@@ -215,6 +216,20 @@ pub(crate) async fn client_connection(
 
                     },
                     '1' => { if let Err(e) = start_screen_handler(
+                        &mut msg.clone(),
+                        &mut sender,
+                        &addr,
+                        &token,
+                        &mut nonce,
+                        &mut username,
+                        &timer,
+                        list_lock.clone(),
+                        &mut db
+                    ).await{
+                        error!("{}", e);
+                        break;
+                    } },
+                    '2' => { if let Err(e) = sign_up_handler(
                         &mut msg.clone(),
                         &mut sender,
                         &addr,

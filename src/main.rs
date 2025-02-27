@@ -4,6 +4,7 @@ mod screen_state;
 mod client_connection;
 mod tls_cert_gen;
 mod login_screen;
+mod sign_up;
 
 use crate::client_connection::client_connection;
 use crate::connection_info::ConnectionInfo;

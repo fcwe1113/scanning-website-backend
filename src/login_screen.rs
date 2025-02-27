@@ -95,6 +95,7 @@ async fn start_screen(
             } else {
                 info!("updated nonce sent to {}: {}", addr, nonce);
                 // let _ = Ok::<String, String>("nonce updated".to_string());
+                Ok("STATUS ok".to_string())
             }
         } else {
             bail!("invalid status check for {}", addr);
@@ -147,6 +148,7 @@ async fn start_screen(
                 bail!("failed to send login error to {}: {}", addr, e);
             } else {
                 info!("login error sent to {}", addr);
+                Ok("login fail".to_string())
             }
         } else {
             if let Err(e) = sender.send(Message::from("1OK")).await {
@@ -154,6 +156,7 @@ async fn start_screen(
             } else {
                 info!("login success for {} as {}", addr, login_username);
                 *username = login_username;
+                Ok("login success".to_string())
             }
         }
 
@@ -165,13 +168,13 @@ async fn start_screen(
                 if let Err(_) = sender.send(Message::from("1NEXT2")).await {
                     bail!("failed to send moving on message to {}", addr);
                 }
-                Ok::<&str, Error>("moving to sign up").expect("");
+                Ok(Ok::<String, Error>("moving to sign up".to_string()).expect(""))
             }
             "3" => { // moving onto store locator
                 if let Err(_) = sender.send(Message::from("1NEXT3")).await {
                     bail!("failed to send moving on message to {}", addr);
                 }
-                Ok::<&str, Error>("moving to store locator").expect("");
+                Ok(Ok::<String, Error>("moving to store locator".to_string()).expect(""))
             }
             _ => {
                 bail!("invalid login screen moving on code for {}", addr);
@@ -181,7 +184,7 @@ async fn start_screen(
         bail!("login screen received invalid message from {}: {}", addr, msg);
     }
 
-    Ok("STATUS ok".to_string())
+    // Ok("STATUS ok".to_string())
 }
 
 async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Sized, addr: &SocketAddr, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) -> Result<(), Error> {
@@ -205,10 +208,16 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
                             connection_info.screen = ScreenState::StoreLocator;
                         }
                     }
-                    info!("moving client {} onto start screen", addr);
+                    info!("moving client {} onto store locator screen", addr);
                     Ok(())
                 },
                 "STATUS ok" => {
+                    Ok(()) // do nothing
+                }
+                "login success" => {
+                    Ok(()) // do nothing
+                }
+                "login fail" => {
                     Ok(()) // do nothing
                 }
                 _ => {
