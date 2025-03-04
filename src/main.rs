@@ -56,14 +56,17 @@ use rusqlite::{Connection, Result};
 
 // boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
 
+// compress the folder and run this line to deploy to the server (change the ip if needed)
+// scp -i "C:\Users\fcwe1113\Downloads\scanning-website-backend.pem" -r C:\Users\fcwe1113\RustroverProjects\untitled10.zip ubuntu@13.60.2.169:./scanning-website
+
 // Get the address to bind to aka which address the server listens to
 const LISTENER_ADDR: &str = "0.0.0.0:8080";
 
 // client should send a status check every 2 minutes, the 3 minutes here is to account of ping and other crap
 const STATUS_CHECK_INTERVAL: Duration = Duration::from_secs(180);
 
-const DB_LOCATION: &str = "C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system.db";
-const DB_BACKUP_LOCATION: &str = "C:\\Users\\fcwe1113\\Downloads\\sqlite-tools-win-x64-202501281250\\scanning_system_backup.db";
+const DB_LOCATION: &str = "scanning_system.db";
+const DB_BACKUP_LOCATION: &str = "scanning_system_backup.db";
 
 struct test {
     id: String,

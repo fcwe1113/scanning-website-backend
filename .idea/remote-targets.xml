@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="RemoteTargetsManager">
+    <targets>
+      <target name="ubuntu@13.60.2.169:22" type="ssh/sftp" uuid="7330d6e5-8d2c-4e9a-a306-192c9af01456">
+        <config>
+          <option name="projectRootOnTarget" value="/home/ubuntu/scanning-website" />
+          <option name="serverName" value="ubuntu@13.60.2.169:22 key" />
+          <option name="useRsync" value="true" />
+        </config>
+        <ContributedStateBase type="RsLanguageRuntime">
+          <config>
+            <option name="cargoPath" value="C:\Users\fcwe1113\.cargo\bin\cargo.exe" />
+            <option name="rustcPath" value="C:\Users\fcwe1113\.cargo\bin\rustc.exe" />
+          </config>
+        </ContributedStateBase>
+      </target>
+    </targets>
+  </component>
+</project>
