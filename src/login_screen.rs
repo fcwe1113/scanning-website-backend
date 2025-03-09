@@ -29,7 +29,7 @@ struct password{
 
 pub(crate) async fn start_screen_handler( // handler function for the start screen
                                           msg: &mut String,
-                                          sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+                                          sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
                                           addr: &SocketAddr,
                                           token: &String,
                                           nonce: &mut String,
@@ -72,7 +72,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
 
 async fn start_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,

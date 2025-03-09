@@ -38,7 +38,8 @@ use rustls::{
     crypto::CryptoProvider
 };
 use std::{env, iter, net::SocketAddr, string::String, sync::Arc, time::Duration, collections::HashMap, fs, thread, time};
-use chrono::{TimeDelta, Utc};
+use std::str::FromStr;
+use chrono::{TimeDelta, Utc, NaiveDateTime};
 use futures_util::task::SpawnExt;
 use timer::Timer;
 use tokio::{
@@ -53,7 +54,7 @@ use tungstenite::Utf8Bytes;
 use unicode_segmentation::UnicodeSegmentation;
 use warp::Filter;
 use rusqlite::{Connection, Result};
-
+use serde_json::Value;
 // boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
 
 // compress the folder and run this line to deploy to the server (change the ip if needed)
@@ -71,8 +72,8 @@ const STATUS_CHECK_INTERVAL: TimeDelta = chrono::Duration::minutes(3);
 const DB_LOCATION: &str = "scanning_system.db";
 const DB_BACKUP_LOCATION: &str = "scanning_system_backup.db";
 const LOCAL: bool = true; // flip this var to indicate if code is running on server or local
-const CERT_PATH: &str = if !LOCAL { "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/fullchain.pem" } else {"C:\\Users\\fcwe1113\\Downloads\\fullchain.pem"};
-const PRIVATE_KEY_PATH: &str = if !LOCAL { "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/privkey.pem" } else {"C:\\Users\\fcwe1113\\Downloads\\privkey.pem"};
+const CERT_PATH: &str = "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/fullchain.pem";
+const PRIVATE_KEY_PATH: &str = "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/privkey.pem";
 
 struct test {
     id: String,
@@ -93,9 +94,13 @@ async fn main() {
         .init();
 
     // make the master list of all current active connections
-    let mut connections_list: Vec<ConnectionInfo> = Vec::new();
+    let connections_list: Vec<ConnectionInfo> = Vec::new();
     // slap a lock on that guy bc guy is popular and getting harassed by multiple ppl at once is bad
     let connections_list_lock = Arc::new(Mutex::new(connections_list));
+
+    // make a list of usernames currently being registered
+    let temp_sign_up_username_list: Vec<String> = Vec::new();
+    let temp_sign_up_username_list_lock = Arc::new(Mutex::new(temp_sign_up_username_list)); // and mutex it
 
     // generate the cert and the private key
     // let (b) = generate_acme_cert().await.unwrap();
@@ -105,18 +110,18 @@ async fn main() {
     // let private_key = private_key.private_key_to_der().unwrap();
 
     // change the paths accordingly for server/local versions
-    let cert = CertificateDer::from_pem_file(CERT_PATH).unwrap();
-    let private_key = PrivateKeyDer::from_pem_file(PRIVATE_KEY_PATH).unwrap();
-    debug!("TLS certificate loaded");
+    // let cert = CertificateDer::from_pem_file(CERT_PATH).unwrap();
+    // let private_key = PrivateKeyDer::from_pem_file(PRIVATE_KEY_PATH).unwrap();
+    // debug!("TLS certificate loaded");
 
     // set up TLS acceptor
     // currently the cert is dealt with on the server side via certbot and letsencrypt
     // certbot: https://certbot.eff.org/
     // letsencrypt: https://letsencrypt.org/
-    rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
-    let config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(vec![CertificateDer::from(cert)], PrivateKeyDer::try_from(private_key).unwrap()).unwrap();
+    // rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
+    // let config = rustls::ServerConfig::builder()
+    //     .with_no_client_auth()
+    //     .with_single_cert(vec![CertificateDer::from(cert)], PrivateKeyDer::try_from(private_key).unwrap()).unwrap();
 
     // db testing
     // IMPORTANT!!!!!!!!!!!!!!!!!!!
@@ -166,14 +171,14 @@ async fn main() {
 
     info!("Listening on: {}", LISTENER_ADDR);
 
-    let tls_acceptor = TlsAcceptor::from(Arc::new(config));
+    // let tls_acceptor = TlsAcceptor::from(Arc::new(config));
 
     // waits for an incoming connection and runs the loop if there is one coming in
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
                 let incoming_addr = stream.peer_addr().unwrap(); // get the client ip now because thats not possible after the connection is upgraded to TLS
-                let stream = tls_acceptor.accept(stream).await.unwrap(); // upgrading the connection to TLS
+                // let stream = tls_acceptor.accept(stream).await.unwrap(); // upgrading the connection to TLS
 
                 let mut is_duplicate = false;
 
@@ -216,6 +221,7 @@ async fn main() {
                             String::new(),
                             Timer::new(),
                             connections_list_lock.clone(),
+                            temp_sign_up_username_list_lock.clone(),
                             Connection::open(DB_LOCATION).unwrap()
                         ));
                         // return Response::new(());

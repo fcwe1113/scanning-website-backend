@@ -20,7 +20,6 @@ use openssl::hash::MessageDigest;
 use rand::Rng;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
-use ring::aead::quic::AES_256;
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
 use timer::Timer;
@@ -39,7 +38,7 @@ use crate::token_exchange::token_exchange_handler;
 // which im not
 // for now every change to the list requires a mutex lock
 pub(crate) async fn client_connection(
-    stream: TlsStream<TcpStream>,
+    stream: TcpStream,
     addr: SocketAddr,
     token: String,
     mut token_exchanged: bool,
@@ -47,6 +46,7 @@ pub(crate) async fn client_connection(
     mut username: String,
     timer: Timer,
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
+    sign_up_username_list_lock: Arc<Mutex<Vec<String>>>,
     mut db: Connection
 ) {
     // note we dont want to lock the list and pass the list in by ref
@@ -194,6 +194,7 @@ pub(crate) async fn client_connection(
                         &mut username,
                         &timer,
                         list_lock.clone(),
+                        sign_up_username_list_lock.clone(),
                         &mut db
                     ).await{
                         error!("{}", e);
