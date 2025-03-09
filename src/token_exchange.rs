@@ -3,7 +3,6 @@ use std::iter;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use anyhow::{bail, Error};
-use async_channel::Sender;
 use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
 use log::{debug, error, info};
@@ -13,7 +12,6 @@ use rand_chacha::rand_core::SeedableRng;
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tracing::field::debug;
 use tungstenite::{Message, Utf8Bytes};
 use crate::connection_info::ConnectionInfo;
 use crate::screen_state::ScreenState;
@@ -38,7 +36,7 @@ use crate::screen_state::ScreenState;
 
 pub(crate) async fn token_exchange_handler(
     msg: String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     token_exchanged: &mut bool,
     addr: &SocketAddr,
     token: &String,
@@ -61,21 +59,21 @@ pub(crate) async fn token_exchange_handler(
 async fn token_exchange(
     msg: String,
     token: &String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     flag: &bool,
     nonce: &mut String
 ) -> Result<String, Error> {
 
-    if (msg == "NEXT") {
+    if msg == "NEXT" {
         // debug!("{}", flag.to_string());
-        if *flag == true { // 0h check flag
+        if *flag { // 0h check flag
             if let Err(_e) = sender.send(Message::Text(Utf8Bytes::from("0NEXT"))).await /*0h ack*/ {}
             Ok(String::from("moving on"))
         } else {
             bail!("client {addr} tries to move to start screen before token was exchanged") // 0h error handling
         }
-    } else if (msg == *token){ // 0f check token
+    } else if msg == *token { // 0f check token
         let mut rng = ChaCha20Rng::from_os_rng();
 
         *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();

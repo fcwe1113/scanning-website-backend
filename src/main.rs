@@ -38,7 +38,7 @@ use rustls::{
     crypto::CryptoProvider
 };
 use std::{env, iter, net::SocketAddr, string::String, sync::Arc, time::Duration, collections::HashMap, fs, thread, time};
-use chrono::Utc;
+use chrono::{TimeDelta, Utc};
 use futures_util::task::SpawnExt;
 use timer::Timer;
 use tokio::{
@@ -58,15 +58,21 @@ use rusqlite::{Connection, Result};
 
 // compress the folder and run this line to deploy to the server (change the ip if needed)
 // scp -i "C:\Users\fcwe1113\Downloads\scanning-website-backend.pem" -r C:\Users\fcwe1113\RustroverProjects\untitled10.zip ubuntu@13.60.2.169:./scanning-website
+// the aws server will likely run out of memory while compiling the code so run "cargo run --release --jobs 1" to limit memory use while compiling
+// if the aws server changes the ip update it here: https://ipv4.cloudns.net/api/dynamicURL/?q=OTAzMjM0ODo1ODQ0NTk5MTg6Y2JmZWRkMjM5MjliZTBkZWMyZWExNTM5NzlkN2NiMWFmNjIxNzEwM2M2YzY0ZmQ4YTNlZjM1MWUwNzk5YTgyNw
 
-// Get the address to bind to aka which address the server listens to
+// the address to bind to aka which address the server listens to
+// 0.0.0.0:8080 means to listen to everything coming into port 8080
 const LISTENER_ADDR: &str = "0.0.0.0:8080";
 
 // client should send a status check every 2 minutes, the 3 minutes here is to account of ping and other crap
-const STATUS_CHECK_INTERVAL: Duration = Duration::from_secs(180);
+const STATUS_CHECK_INTERVAL: TimeDelta = chrono::Duration::minutes(3);
 
 const DB_LOCATION: &str = "scanning_system.db";
 const DB_BACKUP_LOCATION: &str = "scanning_system_backup.db";
+const LOCAL: bool = true; // flip this var to indicate if code is running on server or local
+const CERT_PATH: &str = if !LOCAL { "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/fullchain.pem" } else {"C:\\Users\\fcwe1113\\Downloads\\fullchain.pem"};
+const PRIVATE_KEY_PATH: &str = if !LOCAL { "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/privkey.pem" } else {"C:\\Users\\fcwe1113\\Downloads\\privkey.pem"};
 
 struct test {
     id: String,
@@ -75,13 +81,6 @@ struct test {
 
 #[tokio::main]
 async fn main() {
-
-    // let mut rng = ChaCha20Rng::from_os_rng();
-    //
-    // for i in 0..10 {
-    //     // salt generator for account creation
-    //     println!("{}", (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>());
-    // }
 
     // Initialize the logger
     tracing_subscriber::registry()
@@ -93,66 +92,42 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    // let current_dir = std::env::current_dir().expect("failed to read current directory");
-    // debug!("current directory: {:?}", current_dir);
-    // let routes = warp::get().and(warp::fs::dir(current_dir));warp::serve(routes)
-    //     .tls()
-    //     .cert_path("cert.pem")
-    //     .key_path("key.rsa")
-    //     .run(([0, 0, 0, 0], 9231)).await;
-
     // make the master list of all current active connections
     let mut connections_list: Vec<ConnectionInfo> = Vec::new();
     // slap a lock on that guy bc guy is popular and getting harassed by multiple ppl at once is bad
     let connections_list_lock = Arc::new(Mutex::new(connections_list));
 
-    // EVERYTHING FROM HERE IS SKIPPED
-    // EVERYTHING FROM HERE IS SKIPPED
-    // EVERYTHING FROM HERE IS SKIPPED
-
     // generate the cert and the private key
     // let (b) = generate_acme_cert().await.unwrap();
 
-    // let (mut cert, private_key) = generate_self_signed_cert().unwrap();
+    // let (cert, private_key) = generate_self_signed_cert().unwrap();
     // let cert = cert.to_der().unwrap();
     // let private_key = private_key.private_key_to_der().unwrap();
 
-    let cert = CertificateDer::from_pem_file("localhost.crt").unwrap();
-    let private_key = PrivateKeyDer::from_pem_file("localhost.key").unwrap();
+    // change the paths accordingly for server/local versions
+    let cert = CertificateDer::from_pem_file(CERT_PATH).unwrap();
+    let private_key = PrivateKeyDer::from_pem_file(PRIVATE_KEY_PATH).unwrap();
+    debug!("TLS certificate loaded");
 
     // set up TLS acceptor
-    // currently the cert we self made was not trusted by the client and bc we didnt handle the error here the server dies
-    // https://letsencrypt.org/getting-started/ provides free valid certs
-    // and https://docs.rs/acme2/latest/acme2/ provides the way to get that cert in program
-    // todo use that instead of the self made one
-    // we can still keep it as a plan b if the valid cert is unavailable somehow
+    // currently the cert is dealt with on the server side via certbot and letsencrypt
+    // certbot: https://certbot.eff.org/
+    // letsencrypt: https://letsencrypt.org/
     rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(vec![CertificateDer::from(cert)], PrivateKeyDer::try_from(private_key).unwrap()).unwrap();
-    let acceptor = TlsAcceptor::from(Arc::new(config));
-
-    // SKIPPING SECTION END
-    // SKIPPING SECTION END
-    // SKIPPING SECTION END
 
     // db testing
     // IMPORTANT!!!!!!!!!!!!!!!!!!!
     // REMEMBER TO USE "begin transaction" BEFORE CHANGING ANYTHING
     // OR ONE BAD COMMAND MEANS DEATH TO THE DBBBBBBBBBBBBBBBBB
 
-    // make a backup when the server first start
-    // let mut backup_timer = Timer::new();
-    // db_backup(&mut backup_timer);
-    // let backup_scheduler = thread::spawn(|| {
-    //
-    // });
-
     // this line will try and connect to a db and will cause a panic if it fails to connect to one
     let mut db = Connection::open(DB_LOCATION).unwrap();
-    thread::spawn(|| {
+    thread::spawn(|| { // thread to backup the db every 3 hrs
         loop{
-            fs::copy(DB_LOCATION, DB_BACKUP_LOCATION); // yes it panics and crashes if it cant copy, no its not a bug its a feature
+            let _ = fs::copy(DB_LOCATION, DB_BACKUP_LOCATION); // yes it panics and crashes if it cant copy, no its not a bug its a feature
             info!("DB backed up");
             thread::sleep(Duration::from_secs(10800)); // thats 3 hours worth of seconds
         }
@@ -183,7 +158,7 @@ async fn main() {
     }
     println!("{}", output);
     output += &*String::from(output.chars().last().unwrap());
-    // ? are holes you fill into the statement
+    // ? are holes you fill into the statement (prepared statements)
     db.execute("UPDATE test SET name = ?1 WHERE id = '01';", [output]).unwrap();
 
     // Create the TCP listener
@@ -191,20 +166,14 @@ async fn main() {
 
     info!("Listening on: {}", LISTENER_ADDR);
 
+    let tls_acceptor = TlsAcceptor::from(Arc::new(config));
+
     // waits for an incoming connection and runs the loop if there is one coming in
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                let incoming_addr = stream.peer_addr().unwrap();
-
-                // let acceptor = acceptor.clone();
-                // let mut tls_stream = acceptor.accept(stream).await.unwrap();
-
-                // NOTE:
-                // this TLS adventure is a dead end as to even attempt to make a valid cert
-                // you need a domain name for the backend which i dont and very likely wont have ever
-                // source: https://users.rust-lang.org/t/ed25519-and-rustls-tls-client-server/80133/4
-                // at this current stage there is no point in continuing this further
+                let incoming_addr = stream.peer_addr().unwrap(); // get the client ip now because thats not possible after the connection is upgraded to TLS
+                let stream = tls_acceptor.accept(stream).await.unwrap(); // upgrading the connection to TLS
 
                 let mut is_duplicate = false;
 
@@ -215,6 +184,8 @@ async fn main() {
                 // todo0
                 // either disable this dickish behaviour in react or somehow find a way to disconnect the redundant connection here
                 // disabled it on react by disabling strict mode yaaaaaaaaaaaaaaayyyyyy
+                // the duplicate check is kept in in case of other shenanigans that can happen with duplicate client ips
+                // plus it shouldnt be happening in the first place anyways
 
                 {
                     // this code here is surrounded with {} bc we want to ensure the entire code block here locks up

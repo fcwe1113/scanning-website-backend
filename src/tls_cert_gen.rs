@@ -1,3 +1,8 @@
+// NOTE:
+// this code is now unused due to the tls cert gen being delegated to the server and we just read the pem from the server
+// it is kept for reference and just in case i ever need it again (extremely unlikely but who knows)
+// consider moving it somewhere on release so we dont need to compile openssl every time we change something
+
 use crate::LISTENER_ADDR;
 use acme2::{
     gen_rsa_private_key,

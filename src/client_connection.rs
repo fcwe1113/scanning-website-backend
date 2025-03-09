@@ -1,5 +1,4 @@
 use std::{
-    future::Future,
     net::SocketAddr,
     sync::Arc
 };
@@ -25,10 +24,13 @@ use ring::aead::quic::AES_256;
 use chrono::{DateTime, Duration, Utc};
 use rusqlite::Connection;
 use timer::Timer;
+use tokio_rustls::TlsAcceptor;
+use tracing_subscriber::layer::Identity;
 use crate::connection_info::ConnectionInfo;
 use crate::login_screen::start_screen_handler;
 use crate::screen_state::ScreenState;
 use crate::sign_up::sign_up_handler;
+use crate::STATUS_CHECK_INTERVAL;
 use crate::token_exchange::token_exchange_handler;
 
 // note:
@@ -37,7 +39,7 @@ use crate::token_exchange::token_exchange_handler;
 // which im not
 // for now every change to the list requires a mutex lock
 pub(crate) async fn client_connection(
-    stream: TcpStream,
+    stream: TlsStream<TcpStream>,
     addr: SocketAddr,
     token: String,
     mut token_exchanged: bool,
@@ -66,20 +68,6 @@ pub(crate) async fn client_connection(
         }
     };
 
-    // 0a. generating key pair
-    // todo try to use https://github.com/ravikiran232/rsa to generate keys in OAEP encoding as the client code only supports that
-    // use https://anycript.com/crypto/rsa to double check
-
-    // let aes = AesKey::new_encrypt(&(0..32).map(|_| u8::try_from(rng.random_range(0..255)).unwrap()).collect::<Vec<u8>>()).unwrap();
-    // let rsa = Rsa::generate(2048).unwrap();
-    // let key = PKey::from_rsa(rsa.clone()).unwrap(); // contains both the public key and private key
-    // println!("{}", String::from_utf8(key.private_key_to_pem_pkcs8().unwrap()).unwrap());
-    // let client_private_key: String;
-    // let mut decrypter = Decrypter::new(&key).unwrap();
-    // decrypter.set_rsa_padding(Padding::NONE).unwrap();
-
-    // println!("public key {:?}", public_key);
-
     // Split the WebSocket stream into a sender and receiver
     let (mut sender, mut receiver) = ws_stream.split();
 
@@ -92,7 +80,7 @@ pub(crate) async fn client_connection(
 
     // set status check timer
     // println!("timer set");
-    timer.schedule_with_delay(Duration::minutes(3), move || {return;});
+    timer.schedule_with_delay(STATUS_CHECK_INTERVAL, move || {return;});
 
     // Handle incoming messages
     while let Some(msg) = receiver.next().await {
@@ -109,38 +97,6 @@ pub(crate) async fn client_connection(
                         text = text.replace(nonce.clone().as_str(), "");
                     }
                 }
-
-                // encrypting messages are getting benched right now
-                // let text = text.as_bytes();
-                //
-                // // Decrypt the data
-                // let mut decrypter = Decrypter::new(&key).unwrap();
-                // decrypter.set_rsa_padding(Padding::NONE).unwrap();
-                // decrypter.set_rsa_oaep_md(MessageDigest::sha512()).expect("wdym cant set oaep md");
-                // // Create an output buffer
-                // let buffer_len = decrypter.decrypt_len(&text).unwrap();
-                // let mut decrypted = vec![0; buffer_len];
-                // // Encrypt and truncate the buffer
-                // let decrypted_len = decrypter.decrypt(&text, &mut decrypted).unwrap();
-                // decrypted.truncate(decrypted_len);
-                // println!("{}", String::from_utf8(decrypted).unwrap());
-
-                // let data_len = text.len();
-                // let buf_len = rsa.size() as usize;
-                // println!("buf {} data {}", buf_len, data_len);
-                // let mut buffer: Vec<u8> = vec![0; buf_len];
-                // let mut decrypted_data: Vec<u8> = Vec::new();
-                // println!("{}", rsa.size());
-                // for chunk in text.chunks(buf_len) {
-                //     rsa.private_decrypt(chunk, &mut buffer, Padding::NONE).expect("Error Decrypting");;
-                //     decrypted_data.extend_from_slice(buffer.as_slice());
-                // }
-                // println!("{:?}", String::from_utf8(decrypted_data));
-
-
-                // let text = "lol";
-                // debug!("Message received from {}: {}", addr, text);
-
 
                 // first digit denotes client screen status
                 // after reading the first digit get rid of it and pass the rest of the message into the relevant function

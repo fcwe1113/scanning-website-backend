@@ -11,7 +11,7 @@ futures-util = { version = "0.3" }
 tokio = { version = "1.0", features = ["full"] }
 tracing = { version = "0.1" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tokio-tungstenite = "0.26.2"
+tokio-tungstenite = { version =  "0.26.2", features = ["rustls", "rustls-tls-webpki-roots"] }
 tungstenite = "0.26.2"
 futures = "0.3.31"
 log = "0.4.26"
@@ -22,7 +22,7 @@ rand_chacha = "0.9.0"
 hex = "0.4.3"
 warp = { version = "0.3.7", features = ["tls"] }
 tokio-rustls = "0.26.1"
-rustls = { version =  "0.23.23", features = ["ring","logging","tls12"] }
+rustls = { version =  "0.23.23", features = ["ring", "logging", "tls12"] }
 openssl = { version = "0.10.71", features = ["vendored"] }
 acme2 = "0.5.1"
 tokio-rustls-acme = "0.6.0"

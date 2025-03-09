@@ -13,6 +13,7 @@ use rusqlite::Connection;
 use timer::Timer;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
+use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::Message;
 use crate::connection_info::ConnectionInfo;
@@ -20,7 +21,7 @@ use crate::screen_state::ScreenState;
 
 pub(crate) async fn sign_up_handler( // handler function for the start screen
                                      msg: &mut String,
-                                     sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+                                     sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
                                      addr: &SocketAddr,
                                      token: &String,
                                      nonce: &mut String,
@@ -31,23 +32,23 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
 ) -> Result<(), Error>{
 
     // 2 = start screen
-    // a. check items: token
-    // b. do regular status checks until user either clicks log in sign up or proceed as guest***
-    // c. if user logs in client sends username and password in textbox***
-    // with the format "1username password"
-    // I. server querys db to get password of username
-    // II. server saves username locally and pings down OK if correct
-    // if db returns incorrect or empty pings down FAIL and returns to step 1b.
-    // III. client saves the username locally and pings "1NEXT3" to server***, server go to step 1f.
-    // d. if user clicks sign up client pings "1NEXT2"***, server go to step 1f.
-    // e. if user clicks proceed as guest client pings "1guest 00000000" to server***
-    // I. server saves the username locally and pings "1ACK" to client
-    // II. client saves username locally and pings "1NEXT 3 token"***, server go to step 1f.
-    // f. server decipher the message, checks the token to be correct,
-    // and extract the destination screen status contained in it
-    // g. server pings "1NEXT *2/3*" depending on which one the client sent before
-    // and server moves on to that state
-    // h. client receives message and also moves on to the next state
+        // a. check items: token
+        // b. do regular status checks until user either clicks log in sign up or proceed as guest***
+        // c. if user logs in client sends username and password in textbox***
+        // with the format "1username password"
+            // I. server querys db to get password of username
+            // II. server saves username locally and pings down OK if correct
+            // if db returns incorrect or empty pings down FAIL and returns to step 1b.
+            // III. client saves the username locally and pings "1NEXT3" to server***, server go to step 1f.
+        // d. if user clicks sign up client pings "1NEXT2"***, server go to step 1f.
+        // e. if user clicks proceed as guest client pings "1guest 00000000" to server***
+            // I. server saves the username locally and pings "1ACK" to client
+            // II. client saves username locally and pings "1NEXT 3 token"***, server go to step 1f.
+        // f. server decipher the message, checks the token to be correct,
+        // and extract the destination screen status contained in it
+        // g. server pings "1NEXT *2/3*" depending on which one the client sent before
+        // and server moves on to that state
+        // h. client receives message and also moves on to the next state
 
     // debug!("Starting screen handler received {}", msg);
     // println!("{}", msg.chars().take(5).collect::<String>());
@@ -63,7 +64,7 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
 
 async fn sign_up_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,

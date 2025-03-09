@@ -15,6 +15,7 @@ use tokio::{net::TcpStream, sync::Mutex, task};
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::{Message, Utf8Bytes};
 use rusqlite::{Connection, fallible_iterator::FallibleIterator};
+use tokio_rustls::server::TlsStream;
 use crate::connection_info::ConnectionInfo;
 use crate::screen_state::ScreenState;
 use crate::test;
@@ -27,15 +28,15 @@ struct password{
 }
 
 pub(crate) async fn start_screen_handler( // handler function for the start screen
-    msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
-    addr: &SocketAddr,
-    token: &String,
-    nonce: &mut String,
-    username: &mut String,
-    timer: &Timer,
-    list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
-    db: &mut Connection
+                                          msg: &mut String,
+                                          sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+                                          addr: &SocketAddr,
+                                          token: &String,
+                                          nonce: &mut String,
+                                          username: &mut String,
+                                          timer: &Timer,
+                                          list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
+                                          db: &mut Connection
 ) -> Result<(), Error>{
 
     // 1 = start screen
@@ -71,7 +72,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
 
 async fn start_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
