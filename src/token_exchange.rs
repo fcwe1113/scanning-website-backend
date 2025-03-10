@@ -99,7 +99,6 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
                 "token ackked" => {
                     debug!("Token ackked");
                     *token_exchanged = true; // 0f flag
-                    debug!("{:#?}", token_exchanged);
                     for connection in list_lock.lock().await.iter_mut() {
                         if connection.client_addr == *addr {
                             connection.token = token.clone(); // 0f saves on list

@@ -2,6 +2,9 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use anyhow::{bail, Error};
+use argon2::{Argon2, PasswordHasher};
+use argon2::password_hash::rand_core::OsRng;
+use argon2::password_hash::SaltString;
 use chrono::{Duration, NaiveDateTime};
 use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
@@ -13,15 +16,14 @@ use rusqlite::Connection;
 use serde_email::is_valid_email;
 use serde_json::Value;
 use timer::Timer;
-use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tokio::{net::TcpStream, sync::Mutex, task};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::Message;
 use crate::connection_info::ConnectionInfo;
 use crate::screen_state::ScreenState;
 
-struct sign_up_form{
+pub(crate) struct SignUpForm {
     username: String,
     password: String,
     first_name: String,
@@ -31,9 +33,33 @@ struct sign_up_form{
     email: String,
 }
 
-impl sign_up_form{
+struct DbUsername {
+    username: String,
+}
+
+impl SignUpForm {
+
+    pub(crate) fn new_empty() -> Self {
+        SignUpForm {
+            username: String::new(),
+            password: String::new(),
+            first_name: String::new(),
+            last_name: String::new(),
+            dob_string: String::new(),
+            dob: NaiveDateTime::MIN,
+            email: String::new(),
+        }
+    }
     fn add_dob(&mut self, dob: &NaiveDateTime){
         self.dob = *dob;
+    }
+
+    fn remove_quotes(&mut self){
+        self.username = self.username[1..self.username.len()-1].to_string();
+        self.password = self.password[1..self.password.len()-1].to_string();
+        self.first_name = self.first_name[1..self.first_name.len()-1].to_string();
+        self.last_name = self.last_name[1..self.last_name.len()-1].to_string();
+        self.email = self.email[1..self.email.len()-1].to_string();
     }
 }
 
@@ -43,10 +69,11 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
                                      addr: &SocketAddr,
                                      token: &String,
                                      nonce: &mut String,
-                                     username: &mut String,
+                                     session_username: &mut String,
                                      timer: &Timer,
                                      list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
                                      sign_up_username_list_lock: Arc<Mutex<Vec<String>>>,
+                                     sign_up_form: &mut SignUpForm,
                                      db: &mut Connection
 ) -> Result<(), Error>{
 
@@ -55,21 +82,23 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
         // b. do regular status checks until user either clicks log in sign up or proceed as guest***
         // c. if user enters all relevant info and client sanitises input***
         // d. client then sends username to backend to check for clashes***
-        // with the format "2CHECK [JSON of the entire sign up form]"
-        // e. server does another sanitize check and run the username with db and a list of usernames being signed up
+        // with the format "2CHECK[JSON of the entire sign up form]"
+        // e. server does another sanitize check
+            // I. if there are errors then the list of error messages would be sent down prepended with "2BADFORM"
+        // f. server run the username with db and a list of usernames being signed up
             // I. if no clashes from both, send "2NAMEOK" and put the name in the list
             // server should also send the verification email with the generated token (that is going to be ABCDEF) but nahhhhhhhhhhh
             // II. if a clash is found send "2BADNAME" and restart the process
-        // f. client then does the email verification* and send back "2EMAIL verify_token"***
-        // i have a feeling that the token would be ABCDEF but idk
+        // g. client then does the email verification* and send back "2EMAILverify_token"***
+            // i have a feeling that the token would be ABCDEF but idk
             // I. if the token is incorrect send "2BADEMAIL"
-        // g. server runs the sql command to insert a new row containing all the given information, and send "2OK" after its done
-        // h. move on to the store locator
+        // h. server runs the sql command to insert a new row containing all the given information, and send "2OK" after its done
+        // i. move on to the store locator
 
     // debug!("Starting screen handler received {}", msg);
     // println!("{}", msg.chars().take(5).collect::<String>());
     // println!("{}", msg);
-    let result = sign_up_screen(msg, sender, addr, token, nonce, timer, db, username);
+    let result = sign_up_screen(msg, sender, addr, token, nonce, timer, db, sign_up_form, session_username);
     if let Err(err) = resolve_result(result, addr, list_lock.clone()).await {
         bail!(err);
     }
@@ -86,7 +115,8 @@ async fn sign_up_screen(
     nonce: &mut String,
     timer: &Timer,
     db: &mut Connection,
-    username: &mut String
+    sign_up_form: &mut SignUpForm,
+    session_username: &mut String
 ) -> Result<String, Error> {
     if msg.chars().take(6).collect::<String>() == "STATUS" {
         // messages starting with STATUS denotes that this is a regular status check
@@ -119,94 +149,161 @@ async fn sign_up_screen(
                 Ok(Ok::<String, Error>("moving to login".to_string()).expect(""))
             }
             "3" => { // moving onto store locator
-                if let Err(_) = sender.send(Message::from("2NEXT3")).await {
-                    bail!("failed to send moving on message to {}", addr);
+                if msg.chars().skip(6).collect::<String>() == *session_username {
+                    if let Err(_) = sender.send(Message::from("2NEXT3")).await {
+                        bail!("failed to send moving on message to {}", addr);
+                    }
+
+                    Ok(Ok::<String, Error>("moving to store locator".to_string()).expect(""))
+                } else {
+                    bail!("invalid session username for client {}", addr);
                 }
-                Ok(Ok::<String, Error>("moving to store locator".to_string()).expect(""))
             }
             _ => {
                 bail!("invalid login screen moving on code for {}", addr);
             }
         }
     } else if msg.chars().take(5).collect::<String>() == "CHECK" {
-        let json: Value = serde_json::from_str(msg.chars().skip(6).collect::<String>().as_str())?;
-        let mut form = sign_up_form{
+        let json: Value = serde_json::from_str(msg.chars().skip(5).collect::<String>().as_str())?;
+        let mut form = SignUpForm {
             username: json["username"].to_string(),
             password: json["password"].to_string(),
             first_name: json["first_name"].to_string(),
             last_name: json["last_name"].to_string(),
-            dob_string: json["dob_string"].to_string(),
-            dob: NaiveDateTime::MIN, // just filling it with something to shut it up
+            dob_string: json["dob"].to_string(),
+            dob: NaiveDateTime::MIN, // just filling it with something to shut the compiler up
             email: json["email"].to_string(),
         };
+        form.remove_quotes();
 
         // sanitize inputs again bc who knows what can be in there
         let mut errors = String::new();
-        // username (no spaces)
-        if form.username == "" {
-            errors += "username is empty\n";
-        } else if form.username.contains(char::is_whitespace) {
-            errors += "username cannot contain whitespace characters\n";
+        sanitize(&mut form, &mut errors);
+        println!("{}", form.dob.to_string());
+
+        if !errors.is_empty() {
+            if let Err(e) = sender.send(Message::from(format!("2BADFORM {}", errors))).await{
+                bail!("failed to send bad form errors to {}: {}", addr, e);
+            } else {
+                return Ok("STATUS ok".parse()?)
+            }
         }
 
-        // password (need at least 1 upper and lower case char and a number, and at least 8 long, and limited to (non control)ascii)
-        if form.password == "" {
-            errors += "password is empty\n";
-        } else if form.password.chars().all(char::is_ascii) && !form.password.contains(char::is_ascii_control) {
-            errors += "password can contain only (non control) ASCII characters\n";
+        let result = task::block_in_place(|| {
+            let mut stmt = db.prepare("SELECT username FROM Users WHERE username = ?").unwrap();
+            let query_iter = stmt.query_map([&form.username], |row| {
+                Ok(DbUsername {
+                    username: row.get(0)?,
+                })
+            }).unwrap();
+            return query_iter.collect::<Result<Vec<_>, _>>().unwrap()
+        });
+        if result.is_empty() { // if result vec is empty that means the username is not taken
+            sender.send(Message::from("2NAMEOK")).await?;
+            debug!("client {} submitted an unused username: {}, please now pretend a confirmation email was sent to the submitted email of {}", addr, &form.username, &form.email);
+            *sign_up_form = form; // save a copy of the form so we can fill in the sql insert query when the email was confirmed
         } else {
-            if form.password.len() < 8 {
-                errors += "password cannot be less than 8 characters\n";
-            }
-            if form.password.contains(char::is_ascii_lowercase) {
-                errors += "password does not have lower case characters\n";
-            }
-            if form.password.contains(char::is_ascii_uppercase) {
-                errors += "password does not have upper case characters\n";
-            }
-            if form.password.contains(char::is_numeric) {
-                errors += "password does not have numeric characters\n";
-            }
-        }
+            sender.send(Message::from("2BADNAME")).await?;
+            debug!("client {} submitted a username in use: {}", addr, &form.username);
+        };
 
-        // maybe limit first/last name to ascii?
-        if form.first_name == "" {
-            errors += "first name is empty\n";
-        }
-        if form.last_name == "" {
-            errors += "last name is empty\n";
-        }
-
-        // dob (following the format: YYYY-MM-DD)
-        if form.dob_string == "" {
-            errors += "date of birth is empty\n";
-        } else {
-            match NaiveDateTime::parse_from_str(&*format!("{} 00:00:00", form.dob_string), "%Y-%m-%d %H:%M:%S") {
-                Ok(dob) => {
-                    form.add_dob(&dob);
-                },
-                Err(e) => {
-                    errors += format!("failed to parse date of birth: {}\n", e).as_str();
-                }
-            }
-        }
-
-        // email ([chars]@[chars].[chars], all with non control ascii)
-        if form.email == "" {
-            errors += "email is empty\n";
-        } else if form.email.chars().all(char::is_ascii) && !form.email.contains(char::is_ascii_control) {
-            errors += "email can contain only (non control) ASCII characters\n";
-        } else if !is_valid_email(form.email) {
-            errors += "email is not valid\n";
-        }
-
-        Ok("dsfbs".parse()?)
+        Ok("STATUS ok".parse()?)
     } else if msg.chars().take(5).collect::<String>() == "EMAIL" {
+        let verification_token = "ABCDE"; // please pretend this line is taking in the generated token that was definitely sent to the new user's email
+        let argon2 = Argon2::default();
+        let rng = ChaCha20Rng::from_os_rng();
+        if msg.chars().skip(6).collect::<String>().as_str() == verification_token {
+            let _ = task::block_in_place(|| {
+                let tx = db.transaction().unwrap();
+                tx.execute("INSERT INTO Users (username, password, first_name, last_name, dob, email) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", [
+                    sign_up_form.username.clone(),
+                    argon2.hash_password(sign_up_form.password.clone().as_ref(), &SaltString::generate(&mut OsRng)).unwrap().to_string(),
+                    sign_up_form.first_name.clone(),
+                    sign_up_form.last_name.clone(),
+                    sign_up_form.dob.clone().to_string(),
+                    sign_up_form.email.clone()
+                ]).unwrap();
+                tx.commit().unwrap();
+            });
+            sender.send(Message::from("2OK")).await?;
+            debug!("client {} created a new user with username {}", addr, sign_up_form.username);
+            *sign_up_form = SignUpForm::new_empty(); // delete the form to save memory
+            *session_username = sign_up_form.username.clone();
+        } else {
+            sender.send(Message::from("2BADEMAIL")).await?;
+            debug!("client {} submitted incorrect email verification code", addr);
+        }
 
-
-        Ok("dsfbs".parse()?)
+        Ok("STATUS ok".parse()?)
     } else {
         bail!("sign up screen received invalid message from {}: {}", addr, msg);
+    }
+}
+
+fn sanitize(form: &mut SignUpForm, errors: &mut String) {
+    // username (no spaces) (maybe block unicode?)
+    if form.username.is_empty() || form.username == "\"\"" {
+        *errors += "username is empty\n";
+    } else if form.username.contains(|arg0: char| char::is_ascii_control(&arg0)) {
+        *errors += "username cannot contain control characters\n";
+    } else if form.username.contains(char::is_whitespace) {
+        *errors += "username cannot contain whitespace characters\n";
+    }
+
+    // password (need at least 1 upper and lower case char and a number, and at least 8 long, and limited to (non control)ascii)
+    if form.password.is_empty() || form.password == "\"\"" {
+        *errors += "password is empty\n";
+    } else if !form.password.chars().all(|arg0: char| char::is_ascii(&arg0)) || form.password.contains(|arg0: char| char::is_ascii_control(&arg0)) {
+        *errors += "password can contain only (non control) ASCII characters\n";
+    } else {
+        if form.password.chars().count() < 8 {
+            *errors += "password cannot be less than 8 characters\n";
+        }
+        if !form.password.contains(|arg0: char| char::is_ascii_lowercase(&arg0)) {
+            *errors += "password does not have lower case characters\n";
+        }
+        if !form.password.contains(|arg0: char| char::is_ascii_uppercase(&arg0)) {
+            *errors += "password does not have upper case characters\n";
+        }
+        if !form.password.contains(char::is_numeric) {
+            *errors += "password does not have numeric characters\n";
+        }
+    }
+
+    // maybe limit first/last name to ascii?
+    if form.first_name.is_empty() || form.first_name == "\"\"" {
+        *errors += "first name is empty\n";
+    } else if form.first_name.contains(|arg0: char| char::is_ascii_control(&arg0)) {
+        *errors += "first name cannot contain control characters\n";
+    }
+
+    if form.last_name.is_empty() || form.last_name == "\"\"" {
+        *errors += "last name is empty\n";
+    } else if form.last_name.contains(|arg0: char| char::is_ascii_control(&arg0)) {
+        *errors += "last name cannot contain control characters\n";
+    }
+
+    // dob (following the format: YYYY-MM-DD)
+    if form.dob_string.is_empty() || form.dob_string == "\"\"" {
+        *errors += "date of birth is empty\n";
+    } else {
+        match NaiveDateTime::parse_from_str(&*format!("{} 00:00:00", form.dob_string), "\"%Y-%m-%d\" %H:%M:%S") {
+            Ok(dob) => {
+                form.add_dob(&dob);
+            },
+            Err(e) => {
+                *errors += format!("failed to parse date of birth: {}\n", e).as_str();
+            }
+        }
+    }
+
+    // email ([chars]@[chars].[chars], all with non control ascii)
+    if form.email.is_empty() || form.email == "\"\"" {
+        *errors += "email is empty\n";
+    } else if !form.email.chars().all(|arg0: char| char::is_ascii(&arg0)) || form.email.contains(|arg0: char| char::is_ascii_control(&arg0)) {
+        *errors += "email can contain only (non control) ASCII characters\n";
+    } else if !is_valid_email(form.email.clone()) {
+        *errors += "email is not valid\n";
     }
 }
 

@@ -29,16 +29,16 @@ impl fmt::Display for ScreenState {
 }
 
 impl ScreenState {
-    fn as_i32(&self) -> i32 {
+    pub(crate) fn as_i32(&self) -> i32 {
         match self {
-            Self::TokenHandshake => 1,
-            Self::Start => 2,
-            Self::SignUp => 3,
-            Self::StoreLocator => 4,
-            Self::Scanner => 5,
-            Self::Payment => 6,
-            Self::Transfer => 7,
-            Self::End => 8
+            Self::TokenHandshake => 0,
+            Self::Start => 1,
+            Self::SignUp => 2,
+            Self::StoreLocator => 3,
+            Self::Scanner => 4,
+            Self::Payment => 5,
+            Self::Transfer => 6,
+            Self::End => 7
         }
     }
 }

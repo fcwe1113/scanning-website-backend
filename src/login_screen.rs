@@ -20,10 +20,7 @@ use crate::connection_info::ConnectionInfo;
 use crate::screen_state::ScreenState;
 use crate::test;
 
-struct password{
-    // since the db wont store passwords in plain text but in salted hash the way to check is the password is correct would be to:
-    // get the salted hash the user input password
-    // see if it matches
+struct password{ // essentially a container to hold the db query result
     hash: String,
 }
 
@@ -33,7 +30,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
                                           addr: &SocketAddr,
                                           token: &String,
                                           nonce: &mut String,
-                                          username: &mut String,
+                                          session_username: &mut String,
                                           timer: &Timer,
                                           list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
                                           db: &mut Connection
@@ -61,7 +58,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
     // debug!("Starting screen handler received {}", msg);
     // println!("{}", msg.chars().take(5).collect::<String>());
     // println!("{}", msg);
-    let result = start_screen(msg, sender, addr, &token, nonce, timer, db, username);
+    let result = start_screen(msg, sender, addr, &token, nonce, timer, db, session_username);
     if let Err(err) = resolve_result(result, addr, list_lock.clone()).await {
         bail!(err);
     }
@@ -78,7 +75,7 @@ async fn start_screen(
     nonce: &mut String,
     timer: &Timer,
     db: &mut Connection,
-    username: &mut String) -> Result<String, Error>{
+    session_username: &mut String) -> Result<String, Error>{
     // main start screen function dealing with incoming messages
 
     if msg.chars().take(6).collect::<String>() == "STATUS" {
@@ -156,7 +153,7 @@ async fn start_screen(
                 bail!("failed to send login sucess to {}: {}", addr, e);
             } else {
                 info!("login success for {} as {}", addr, login_username);
-                *username = login_username;
+                *session_username = login_username;
                 Ok("login success".to_string())
             }
         }
@@ -172,10 +169,14 @@ async fn start_screen(
                 Ok(Ok::<String, Error>("moving to sign up".to_string()).expect(""))
             }
             "3" => { // moving onto store locator
-                if let Err(_) = sender.send(Message::from("1NEXT3")).await {
-                    bail!("failed to send moving on message to {}", addr);
+                if msg.chars().skip(6).collect::<String>() == *session_username {
+                    if let Err(_) = sender.send(Message::from("1NEXT3")).await {
+                        bail!("failed to send moving on message to {}", addr);
+                    }
+                    Ok(Ok::<String, Error>("moving to store locator".to_string()).expect(""))
+                } else {
+                    bail!("invalid session username for client {} on login", addr);
                 }
-                Ok(Ok::<String, Error>("moving to store locator".to_string()).expect(""))
             }
             _ => {
                 bail!("invalid login screen moving on code for {}", addr);

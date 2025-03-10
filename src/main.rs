@@ -55,6 +55,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use warp::Filter;
 use rusqlite::{Connection, Result};
 use serde_json::Value;
+use crate::sign_up::SignUpForm;
 // boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
 
 // compress the folder and run this line to deploy to the server (change the ip if needed)
@@ -101,13 +102,6 @@ async fn main() {
     // make a list of usernames currently being registered
     let temp_sign_up_username_list: Vec<String> = Vec::new();
     let temp_sign_up_username_list_lock = Arc::new(Mutex::new(temp_sign_up_username_list)); // and mutex it
-
-    // generate the cert and the private key
-    // let (b) = generate_acme_cert().await.unwrap();
-
-    // let (cert, private_key) = generate_self_signed_cert().unwrap();
-    // let cert = cert.to_der().unwrap();
-    // let private_key = private_key.private_key_to_der().unwrap();
 
     // change the paths accordingly for server/local versions
     // let cert = CertificateDer::from_pem_file(CERT_PATH).unwrap();
@@ -222,6 +216,7 @@ async fn main() {
                             Timer::new(),
                             connections_list_lock.clone(),
                             temp_sign_up_username_list_lock.clone(),
+                            SignUpForm::new_empty(),
                             Connection::open(DB_LOCATION).unwrap()
                         ));
                         // return Response::new(());

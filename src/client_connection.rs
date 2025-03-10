@@ -28,7 +28,7 @@ use tracing_subscriber::layer::Identity;
 use crate::connection_info::ConnectionInfo;
 use crate::login_screen::start_screen_handler;
 use crate::screen_state::ScreenState;
-use crate::sign_up::sign_up_handler;
+use crate::sign_up::{sign_up_handler, SignUpForm};
 use crate::STATUS_CHECK_INTERVAL;
 use crate::token_exchange::token_exchange_handler;
 
@@ -47,6 +47,7 @@ pub(crate) async fn client_connection(
     timer: Timer,
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
     sign_up_username_list_lock: Arc<Mutex<Vec<String>>>,
+    mut sign_up_form: SignUpForm,
     mut db: Connection
 ) {
     // note we dont want to lock the list and pass the list in by ref
@@ -72,7 +73,7 @@ pub(crate) async fn client_connection(
     let (mut sender, mut receiver) = ws_stream.split();
 
     // send the token to the client
-    if let Err(e) = sender.send(Message::from(format!("0{}", token.clone()))).await /*0a sends public key to client*/ {
+    if let Err(e) = sender.send(Message::from(format!("0{}", &token))).await /*0a sends public key to client*/ {
         error!("Error sending message to {}: {}", addr, e);
     } else {
         info!("token sent to {}: {}", addr, &token);
@@ -114,25 +115,7 @@ pub(crate) async fn client_connection(
                 // *** denotes client side tasks
                 // 0 = token exchange
                 // 1 = start screen
-                    // a. check items: token
-                    // b. do regular status checks until user either clicks log in sign up or proceed as guest***
-                    // c. if user logs in client sends username and password in textbox***
-                    // with the format "1username password"
-                        // I. server querys db to get password of username
-                        // II. server saves username locally and pings down OK if correct
-                            // if db returns incorrect or empty pings down BADINFO and returns to step 1b.
-                        // III. client saves the username locally and pings "1NEXT 3 token" to server***, server go to step 1f.
-                    // d. if user clicks sign up client pings "1NEXT 2 token"***, server go to step 1f.
-                    // e. if user clicks proceed as guest client pings "1guest 00000000" to server***
-                        // I. server saves the username locally and pings "1ACK" to client
-                        // II. client saves username locally and pings "1NEXT 3 token"***, server go to step 1f.
-                    // f. server decipher the message, checks the token to be correct,
-                    // and extract the destination screen status contained in it
-                    // g. server pings "1NEXT *2/3*" depending on which one the client sent before
-                    // and server moves on to that state
-                    // h. client receives message and also moves on to the next state
                 // 2 = sign up screen
-                    // NOTE:
                 // 3 = store locator
                 // 4 = main app (the scanning screen)
                 // 5 = payment screen
@@ -141,6 +124,16 @@ pub(crate) async fn client_connection(
 
                 // get first char
                 let first_char = text.chars().next().unwrap();
+
+                // check if first char denotes the page client should be on
+                for connection_info in list_lock.lock().await.iter() {
+                    if connection_info.client_addr == addr {
+                        if char::to_digit(first_char, 10).unwrap() as i32 != connection_info.screen.as_i32() {
+                            error!("client {} has incorrect screen state, exiting", addr);
+                            return
+                        }
+                    }
+                }
 
                 // get the rest of the string
                 let msg = text.chars().next().map(|c| &text[c.len_utf8()..]).unwrap().to_string();
@@ -195,6 +188,7 @@ pub(crate) async fn client_connection(
                         &timer,
                         list_lock.clone(),
                         sign_up_username_list_lock.clone(),
+                        &mut sign_up_form,
                         &mut db
                     ).await{
                         error!("{}", e);
@@ -209,7 +203,7 @@ pub(crate) async fn client_connection(
                 // no to mention sending binary in react syntax is send("the string") compared to
                 // binary which is send(new Blob(["the string"]))
 
-                if let Err(e) = sender.send(Message::Text(Utf8Bytes::from("are u hacking me UWU"))).await {
+                if let Err(e) = sender.send(Message::from("are u hacking me UWU")).await {
                     error!("Error sending message to {}: {}", addr, e);
                 } else {
                     info!("Sent to {}: are u hacking me UWU", addr);
