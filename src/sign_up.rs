@@ -149,7 +149,7 @@ async fn sign_up_screen(
                 Ok(Ok::<String, Error>("moving to login".to_string()).expect(""))
             }
             "3" => { // moving onto store locator
-                if msg.chars().skip(6).collect::<String>() == *session_username {
+                if msg.chars().skip(5).collect::<String>() == *session_username {
                     if let Err(_) = sender.send(Message::from("2NEXT3")).await {
                         bail!("failed to send moving on message to {}", addr);
                     }
@@ -209,10 +209,9 @@ async fn sign_up_screen(
 
         Ok("STATUS ok".parse()?)
     } else if msg.chars().take(5).collect::<String>() == "EMAIL" {
-        let verification_token = "ABCDE"; // please pretend this line is taking in the generated token that was definitely sent to the new user's email
+        let verification_token = "ABCDEF"; // please pretend this line is taking in the generated token that was definitely sent to the new user's email
         let argon2 = Argon2::default();
-        let rng = ChaCha20Rng::from_os_rng();
-        if msg.chars().skip(6).collect::<String>().as_str() == verification_token {
+        if msg.chars().skip(5).collect::<String>().as_str() == verification_token {
             let _ = task::block_in_place(|| {
                 let tx = db.transaction().unwrap();
                 tx.execute("INSERT INTO Users (username, password, first_name, last_name, dob, email) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", [
@@ -227,8 +226,10 @@ async fn sign_up_screen(
             });
             sender.send(Message::from("2OK")).await?;
             debug!("client {} created a new user with username {}", addr, sign_up_form.username);
-            *sign_up_form = SignUpForm::new_empty(); // delete the form to save memory
             *session_username = sign_up_form.username.clone();
+
+            *sign_up_form = SignUpForm::new_empty(); // delete the form to save memory
+
         } else {
             sender.send(Message::from("2BADEMAIL")).await?;
             debug!("client {} submitted incorrect email verification code", addr);
