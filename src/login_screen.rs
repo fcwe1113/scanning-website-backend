@@ -3,9 +3,10 @@ use std::{
     net::SocketAddr,
     sync::Arc
 };
+use std::ops::Add;
 use anyhow::{bail, Error};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::{rand_core::OsRng, SaltString}};
-use chrono::Duration;
+use chrono::{Duration, Local, NaiveDateTime, NaiveTime};
 use futures_util::{SinkExt, stream::SplitSink};
 use log::{debug, error, info};
 use rand::{Rng};
@@ -20,13 +21,9 @@ use crate::connection_info::ConnectionInfo;
 use crate::screen_state::ScreenState;
 use crate::test;
 
-struct password{ // essentially a container to hold the db query result
-    hash: String,
-}
-
 pub(crate) async fn start_screen_handler( // handler function for the start screen
                                           msg: &mut String,
-                                          sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+                                          sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
                                           addr: &SocketAddr,
                                           token: &String,
                                           nonce: &mut String,
@@ -36,24 +33,21 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
                                           db: &mut Connection
 ) -> Result<(), Error>{
 
-    // 1 = start screen
+    // 1 = start screen (login)
         // a. check items: token
         // b. do regular status checks until user either clicks log in sign up or proceed as guest***
-        // c. if user logs in client sends username and password in textbox***
-        // with the format "1username password"
-            // I. server querys db to get password of username
-            // II. server saves username locally and pings down OK if correct
-            // if db returns incorrect or empty pings down FAIL and returns to step 1b.
-            // III. client saves the username locally and pings "1NEXT3" to server***, server go to step 1f.
-        // d. if user clicks sign up client pings "1NEXT2"***, server go to step 1f.
-        // e. if user clicks proceed as guest client pings "1guest 00000000" to server***
-            // I. server saves the username locally and pings "1ACK" to client
-            // II. client saves username locally and pings "1NEXT 3 token"***, server go to step 1f.
-        // f. server decipher the message, checks the token to be correct,
-        // and extract the destination screen status contained in it
-        // g. server pings "1NEXT *2/3*" depending on which one the client sent before
-        // and server moves on to that state
-        // h. client receives message and also moves on to the next state
+        // c. there are 3 branching paths of where the program can go (other than doing nothing)
+            // A. user logins
+                // 1. user fills in username and password and click login, client sends both username and password to server as "1LOGIN[username] [password]"***
+                // 2. server queries db to get password of username
+                // 3. if password is correct then server saves a local copy of the username and pings "1OK", otherwise it pings "1FAIL"
+                // 4. client pings "1NEXT3[username]" to move to the store locator***
+            // B. user signs up
+                // 1. user clicks the sign up button and client pings "1NEXT2" to move to the sign up page***
+            // C. user proceeds as guest
+                // 1. user clicks the proceed as guest button and client pings "1GUEST"***
+                // 2. server generates an unused guest name and pings that name down as "1GUEST[guest username]"
+                // 3. client saves a copy and pings "1NEXT3[guest username]" to move to the store locator***
 
     // debug!("Starting screen handler received {}", msg);
     // println!("{}", msg.chars().take(5).collect::<String>());
@@ -69,7 +63,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
 
 async fn start_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -78,7 +72,7 @@ async fn start_screen(
     session_username: &mut String) -> Result<String, Error>{
     // main start screen function dealing with incoming messages
 
-    if msg.chars().take(6).collect::<String>() == "STATUS" {
+    if msg.chars().take(6).collect::<String>() == "STATUS" { // 1b.
         // messages starting with STATUS denotes that this is a regular status check
         let msg = msg.chars().skip(6).collect::<String>();
         if msg == *token {
@@ -109,10 +103,13 @@ async fn start_screen(
         // println!("username: {}, password: {}", login_username, password);
 
         // use task::block in place for sql code to prevent errors
-        let mut result = task::block_in_place(|| {
-            let mut stmt = db.prepare("SELECT password FROM Users WHERE username = ?1;").unwrap();
+        let mut result = task::block_in_place(|| { // 1cA1. querying db for password
+            struct Password{ // essentially a container to hold the db query result
+                hash: String,
+            }
+            let mut stmt = db.prepare("SELECT password FROM Users WHERE username = ?1 AND TIME(dob) = \"00:00:00\";").unwrap();
             let query_iter = stmt.query_map([login_username.clone()], |row| {
-                Ok(password {
+                Ok(Password {
                     hash: row.get(0).unwrap(),
                 })
             }).unwrap();
@@ -127,14 +124,12 @@ async fn start_screen(
             match argon2.verify_password(password, &PasswordHash::new(&*result[0].hash).unwrap()) {
                 Ok(()) => {
                     // do nothing
-                    // debug!("{} logged in as {}", addr, login_username);
                 }
                 _ => {
                     error = true;
                     println!("failed to verify password");
                 }
             }
-
         } else {
             error = true;
         }
@@ -142,14 +137,14 @@ async fn start_screen(
         // if the error flag is true that means the login failed
         // otherwise it meant the login succeeded
         if error {
-            if let Err(e) = sender.send(Message::from("1FAIL")).await {
+            if let Err(e) = sender.send(Message::from("1FAIL")).await { // 1cA3. pings login fail message
                 bail!("failed to send login error to {}: {}", addr, e);
             } else {
                 info!("login error sent to {}", addr);
                 Ok("login fail".to_string())
             }
         } else {
-            if let Err(e) = sender.send(Message::from("1OK")).await {
+            if let Err(e) = sender.send(Message::from("1OK")).await { // 1cA3. pings login success message
                 bail!("failed to send login sucess to {}: {}", addr, e);
             } else {
                 info!("login success for {} as {}", addr, login_username);
@@ -169,7 +164,7 @@ async fn start_screen(
                 Ok(Ok::<String, Error>("moving to sign up".to_string()).expect(""))
             }
             "3" => { // moving onto store locator
-                if msg.chars().skip(6).collect::<String>() == *session_username {
+                if msg.chars().skip(5).collect::<String>() == *session_username {
                     if let Err(_) = sender.send(Message::from("1NEXT3")).await {
                         bail!("failed to send moving on message to {}", addr);
                     }
@@ -182,6 +177,52 @@ async fn start_screen(
                 bail!("invalid login screen moving on code for {}", addr);
             }
         }
+    } else if msg.chars().take(5).collect::<String>() == "GUEST" {
+        let mut guest_username = String::new();
+        let mut rng = ChaCha20Rng::from_os_rng();
+        loop {
+            guest_username = String::from("Guest") + &*(0..10).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
+            let mut result = task::block_in_place(|| {
+                struct Username {
+                    username: String,
+                }
+                let mut stmt = db.prepare("SELECT username FROM Users WHERE username = ?1;").unwrap();
+                let query_iter = stmt.query_map([guest_username.clone()], |row| {
+                    Ok(Username {
+                        username: row.get(0).unwrap(),
+                    })
+                }).unwrap();
+                return query_iter.collect::<Result<Vec<_>, _>>().unwrap();
+            });
+            if result.is_empty() {
+                let mut datetime = Local::now().naive_local();
+                // since we treat user with 00:00:00 in their dob as real users
+                // we need to force difference of somehow someone clicked on proceed as guest at 00:00:00
+                if datetime.time() == NaiveTime::parse_from_str("00:00:00", "%H:%M:%S")? {
+                    datetime = NaiveDateTime::add(datetime, Duration::seconds(1));
+                }
+                let argon2 = Argon2::default();
+                let _ = task::block_in_place(|| { // 2h. insert new user into db
+                    let tx = db.transaction().unwrap();
+                    tx.execute("INSERT INTO Users (username, password, first_name, last_name, dob, email) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", [
+                        guest_username.clone(),
+                        argon2.hash_password("this is an amazing password".as_ref(), &SaltString::generate(&mut OsRng)).unwrap().to_string(),
+                        String::from("Reese"),
+                        String::from("Pineda"),
+                        datetime.to_string(),
+                        String::from("thisIs@nEmail.com")
+                    ]).unwrap();
+                    tx.commit().unwrap();
+                });
+                debug!("new guest created: {}", guest_username);
+                *session_username = guest_username.clone();
+                sender.send(Message::from(format!("1GUEST{}", guest_username))).await?;
+
+                break
+            }
+        }
+
+        Ok(String::from("STATUS ok"))
     } else {
         bail!("login screen received invalid message from {}: {}", addr, msg);
     }

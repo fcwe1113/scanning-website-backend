@@ -41,7 +41,7 @@ use crate::token_exchange::token_exchange_handler;
 // which im not
 // for now every change to the list requires a mutex lock
 pub(crate) async fn client_connection(
-    stream: TcpStream,
+    stream: TlsStream<TcpStream>,
     addr: SocketAddr,
     token: String,
     mut token_exchanged: bool,

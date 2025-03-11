@@ -67,7 +67,7 @@ impl SignUpForm {
 
 pub(crate) async fn sign_up_handler( // handler function for the start screen
                                      msg: &mut String,
-                                     sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+                                     sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
                                      addr: &SocketAddr,
                                      token: &String,
                                      nonce: &mut String,
@@ -111,7 +111,7 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
 
 async fn sign_up_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -246,7 +246,8 @@ async fn sign_up_screen(
             *session_username = sign_up_form.username.clone();
             {
                 let mut temp_vec = sign_up_username_list_lock.lock().await;
-                temp_vec.remove(temp_vec.iter().position(|i| *i == sign_up_form.username).unwrap()); // remove the temp entry in the sign up list
+                let temp_temp_vec = temp_vec.clone();
+                temp_vec.remove(temp_temp_vec.iter().position(|i| *i == sign_up_form.username).unwrap()); // remove the temp entry in the sign up list
             }
 
             *sign_up_form = SignUpForm::new_empty(); // delete the form to save memory
