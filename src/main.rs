@@ -58,10 +58,9 @@ use serde_json::Value;
 use crate::sign_up::SignUpForm;
 // boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
 
-// compress the folder and run this line to deploy to the server (change the ip if needed)
-// scp -i "C:\Users\fcwe1113\Downloads\scanning-website-backend.pem" -r C:\Users\fcwe1113\RustroverProjects\untitled10.zip ubuntu@13.60.2.169:./scanning-website
+// compress the folder to deploy to the server (change the ip if needed)
+// then ssh into the server with this line ssh -i "C:\Users\fcwe1113\Downloads\scanning-website-backend.pem" ubuntu@efrgtghyujhygrewds.ip-ddns.com to run the backend
 // the aws server will likely run out of memory while compiling the code so run "cargo run --release --jobs 1" to limit memory use while compiling
-// if the aws server changes the ip update it here: https://ipv4.cloudns.net/api/dynamicURL/?q=OTAzMjM0ODo1ODQ0NTk5MTg6Y2JmZWRkMjM5MjliZTBkZWMyZWExNTM5NzlkN2NiMWFmNjIxNzEwM2M2YzY0ZmQ4YTNlZjM1MWUwNzk5YTgyNw
 
 // the address to bind to aka which address the server listens to
 // 0.0.0.0:8080 means to listen to everything coming into port 8080
@@ -72,7 +71,6 @@ const STATUS_CHECK_INTERVAL: i32 = 180; // in seconds
 
 const DB_LOCATION: &str = "scanning_system.db";
 const DB_BACKUP_LOCATION: &str = "scanning_system_backup.db";
-const LOCAL: bool = true; // flip this var to indicate if code is running on server or local
 const CERT_PATH: &str = "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/fullchain.pem";
 const PRIVATE_KEY_PATH: &str = "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/privkey.pem";
 
