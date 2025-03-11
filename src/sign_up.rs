@@ -13,6 +13,7 @@ use rand::Rng;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
 use rusqlite::Connection;
+use rusqlite::fallible_iterator::FallibleIterator;
 use serde_email::is_valid_email;
 use serde_json::Value;
 use timer::Timer;
@@ -23,6 +24,11 @@ use tungstenite::Message;
 use crate::connection_info::ConnectionInfo;
 use crate::screen_state::ScreenState;
 
+struct DbUsername {
+    username: String,
+}
+
+#[derive(Clone)]
 pub(crate) struct SignUpForm {
     username: String,
     password: String,
@@ -31,10 +37,6 @@ pub(crate) struct SignUpForm {
     dob_string: String,
     dob: NaiveDateTime,
     email: String,
-}
-
-struct DbUsername {
-    username: String,
 }
 
 impl SignUpForm {
@@ -70,7 +72,7 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
                                      token: &String,
                                      nonce: &mut String,
                                      session_username: &mut String,
-                                     timer: &Timer,
+                                     status_check_timer: &mut i32,
                                      list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
                                      sign_up_username_list_lock: Arc<Mutex<Vec<String>>>,
                                      sign_up_form: &mut SignUpForm,
@@ -79,9 +81,9 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
 
     // 2 = sign up screen
         // a. check items: token
-        // b. do regular status checks until user either clicks log in sign up or proceed as guest***
-        // c. if user enters all relevant info and client sanitises input***
-        // d. client then sends username to backend to check for clashes***
+        // b. do regular status checks until user either clicks sign up or cancel***
+        // c. user enters all relevant info and client sanitises input***
+        // d. client then sends the JSON form to backend***
         // with the format "2CHECK[JSON of the entire sign up form]"
         // e. server does another sanitize check
             // I. if there are errors then the list of error messages would be sent down prepended with "2BADFORM"
@@ -98,7 +100,7 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
     // debug!("Starting screen handler received {}", msg);
     // println!("{}", msg.chars().take(5).collect::<String>());
     // println!("{}", msg);
-    let result = sign_up_screen(msg, sender, addr, token, nonce, timer, db, sign_up_form, session_username);
+    let result = sign_up_screen(msg, sender, addr, token, nonce, status_check_timer, db, sign_up_form, session_username, sign_up_username_list_lock);
     if let Err(err) = resolve_result(result, addr, list_lock.clone()).await {
         bail!(err);
     }
@@ -113,18 +115,19 @@ async fn sign_up_screen(
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
-    timer: &Timer,
+    status_check_timer: &mut i32,
     db: &mut Connection,
     sign_up_form: &mut SignUpForm,
-    session_username: &mut String
+    session_username: &mut String,
+    sign_up_username_list_lock: Arc<Mutex<Vec<String>>>
 ) -> Result<String, Error> {
     if msg.chars().take(6).collect::<String>() == "STATUS" {
         // messages starting with STATUS denotes that this is a regular status check
         let msg = msg.chars().skip(6).collect::<String>();
-        if msg == *token {
+        if msg == *token { // 2a. checking token
             // resets the timer when the status check is received
             debug!("status checked for {}", addr);
-            timer.schedule_with_delay(Duration::minutes(3), move || { return; });
+            *status_check_timer = 0;
             // generate a new nonce and send it over
             let mut rng = ChaCha20Rng::from_os_rng();
             *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
@@ -150,7 +153,7 @@ async fn sign_up_screen(
             }
             "3" => { // moving onto store locator
                 if msg.chars().skip(5).collect::<String>() == *session_username {
-                    if let Err(_) = sender.send(Message::from("2NEXT3")).await {
+                    if let Err(_) = sender.send(Message::from("2NEXT3")).await { // 2i.
                         bail!("failed to send moving on message to {}", addr);
                     }
 
@@ -178,18 +181,18 @@ async fn sign_up_screen(
 
         // sanitize inputs again bc who knows what can be in there
         let mut errors = String::new();
-        sanitize(&mut form, &mut errors);
+        sanitize(&mut form, &mut errors); // 2e. sanitising
         println!("{}", form.dob.to_string());
 
         if !errors.is_empty() {
-            if let Err(e) = sender.send(Message::from(format!("2BADFORM {}", errors))).await{
+            if let Err(e) = sender.send(Message::from(format!("2BADFORM {}", errors))).await{ // 2eI.
                 bail!("failed to send bad form errors to {}: {}", addr, e);
             } else {
                 return Ok("STATUS ok".parse()?)
             }
         }
 
-        let result = task::block_in_place(|| {
+        let result = task::block_in_place(|| { // 2f. check username against db
             let mut stmt = db.prepare("SELECT username FROM Users WHERE username = ?").unwrap();
             let query_iter = stmt.query_map([&form.username], |row| {
                 Ok(DbUsername {
@@ -199,11 +202,25 @@ async fn sign_up_screen(
             return query_iter.collect::<Result<Vec<_>, _>>().unwrap()
         });
         if result.is_empty() { // if result vec is empty that means the username is not taken
-            sender.send(Message::from("2NAMEOK")).await?;
-            debug!("client {} submitted an unused username: {}, please now pretend a confirmation email was sent to the submitted email of {}", addr, &form.username, &form.email);
-            *sign_up_form = form; // save a copy of the form so we can fill in the sql insert query when the email was confirmed
+            let mut used = false;
+            for i in sign_up_username_list_lock.lock().await.iter() { // 2f. check username against usernames being signed up
+                if *i == *form.username {
+                    used = true;
+                    break;
+                }
+            }
+
+            if !used{
+                sender.send(Message::from("2NAMEOK")).await?; // 2fI.
+                debug!("client {} submitted an unused username: {}, please now pretend a confirmation email was sent to the submitted email of {}", addr, &form.username, &form.email);
+                *sign_up_form = form.clone(); // save a copy of the form so we can fill in the sql insert query when the email was confirmed
+                sign_up_username_list_lock.lock().await.push(form.username);
+            } else {
+                sender.send(Message::from("2BADNAME")).await?; // 2fII.
+                debug!("client {} submitted a username in use: {}", addr, &form.username);
+            }
         } else {
-            sender.send(Message::from("2BADNAME")).await?;
+            sender.send(Message::from("2BADNAME")).await?; // 2fII.
             debug!("client {} submitted a username in use: {}", addr, &form.username);
         };
 
@@ -211,8 +228,8 @@ async fn sign_up_screen(
     } else if msg.chars().take(5).collect::<String>() == "EMAIL" {
         let verification_token = "ABCDEF"; // please pretend this line is taking in the generated token that was definitely sent to the new user's email
         let argon2 = Argon2::default();
-        if msg.chars().skip(5).collect::<String>().as_str() == verification_token {
-            let _ = task::block_in_place(|| {
+        if msg.chars().skip(5).collect::<String>().as_str() == verification_token { // 2g. check against email verification token
+            let _ = task::block_in_place(|| { // 2h. insert new user into db
                 let tx = db.transaction().unwrap();
                 tx.execute("INSERT INTO Users (username, password, first_name, last_name, dob, email) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", [
                     sign_up_form.username.clone(),
@@ -224,14 +241,18 @@ async fn sign_up_screen(
                 ]).unwrap();
                 tx.commit().unwrap();
             });
-            sender.send(Message::from("2OK")).await?;
+            sender.send(Message::from("2OK")).await?; // 2h. tell the client account created
             debug!("client {} created a new user with username {}", addr, sign_up_form.username);
             *session_username = sign_up_form.username.clone();
+            {
+                let mut temp_vec = sign_up_username_list_lock.lock().await;
+                temp_vec.remove(temp_vec.iter().position(|i| *i == sign_up_form.username).unwrap()); // remove the temp entry in the sign up list
+            }
 
             *sign_up_form = SignUpForm::new_empty(); // delete the form to save memory
 
         } else {
-            sender.send(Message::from("2BADEMAIL")).await?;
+            sender.send(Message::from("2BADEMAIL")).await?; // 2gI.
             debug!("client {} submitted incorrect email verification code", addr);
         }
 

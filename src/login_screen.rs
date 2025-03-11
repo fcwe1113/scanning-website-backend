@@ -31,7 +31,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
                                           token: &String,
                                           nonce: &mut String,
                                           session_username: &mut String,
-                                          timer: &Timer,
+                                          status_check_timer: &mut i32,
                                           list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
                                           db: &mut Connection
 ) -> Result<(), Error>{
@@ -58,7 +58,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
     // debug!("Starting screen handler received {}", msg);
     // println!("{}", msg.chars().take(5).collect::<String>());
     // println!("{}", msg);
-    let result = start_screen(msg, sender, addr, &token, nonce, timer, db, session_username);
+    let result = start_screen(msg, sender, addr, &token, nonce, status_check_timer, db, session_username);
     if let Err(err) = resolve_result(result, addr, list_lock.clone()).await {
         bail!(err);
     }
@@ -73,7 +73,7 @@ async fn start_screen(
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
-    timer: &Timer,
+    status_check_timer: &mut i32,
     db: &mut Connection,
     session_username: &mut String) -> Result<String, Error>{
     // main start screen function dealing with incoming messages
@@ -84,7 +84,7 @@ async fn start_screen(
         if msg == *token {
             // resets the timer when the status check is received
             debug!("status checked for {}", addr);
-            timer.schedule_with_delay(Duration::minutes(3), move || { return; });
+            *status_check_timer = 0;
             // generate a new nonce and send it over
             let mut rng = ChaCha20Rng::from_os_rng();
             *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();

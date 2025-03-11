@@ -68,7 +68,7 @@ use crate::sign_up::SignUpForm;
 const LISTENER_ADDR: &str = "0.0.0.0:8080";
 
 // client should send a status check every 2 minutes, the 3 minutes here is to account of ping and other crap
-const STATUS_CHECK_INTERVAL: TimeDelta = chrono::Duration::minutes(3);
+const STATUS_CHECK_INTERVAL: i32 = 180; // in seconds
 
 const DB_LOCATION: &str = "scanning_system.db";
 const DB_BACKUP_LOCATION: &str = "scanning_system_backup.db";
@@ -213,7 +213,7 @@ async fn main() {
                             false,
                             String::from("-1"),
                             String::new(),
-                            Timer::new(),
+                            0,
                             connections_list_lock.clone(),
                             temp_sign_up_username_list_lock.clone(),
                             SignUpForm::new_empty(),

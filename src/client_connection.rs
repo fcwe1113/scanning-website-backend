@@ -1,7 +1,6 @@
-use std::{
-    net::SocketAddr,
-    sync::Arc
-};
+use std::{fs, net::SocketAddr, sync::Arc, thread};
+use std::future::Future;
+use std::task::Poll;
 use anyhow::{bail, Error};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
@@ -12,7 +11,7 @@ use openssl::{
 };
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_rustls::server::TlsStream;
-use tokio_tungstenite::accept_async;
+use tokio_tungstenite::{accept_async, WebSocketStream};
 use tungstenite::{Message, Utf8Bytes};
 use base64::decode;
 use openssl::aes::AesKey;
@@ -21,15 +20,19 @@ use rand::Rng;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
 use chrono::{DateTime, Duration, Utc};
+use futures_util::stream::{Next, SplitStream};
 use rusqlite::Connection;
 use timer::Timer;
+use tokio::sync::oneshot::error::RecvError;
+use tokio::time::{timeout, Timeout};
+use tokio::time::error::Elapsed;
 use tokio_rustls::TlsAcceptor;
 use tracing_subscriber::layer::Identity;
 use crate::connection_info::ConnectionInfo;
 use crate::login_screen::start_screen_handler;
 use crate::screen_state::ScreenState;
 use crate::sign_up::{sign_up_handler, SignUpForm};
-use crate::STATUS_CHECK_INTERVAL;
+use crate::{DB_BACKUP_LOCATION, DB_LOCATION, STATUS_CHECK_INTERVAL};
 use crate::token_exchange::token_exchange_handler;
 
 // note:
@@ -44,7 +47,7 @@ pub(crate) async fn client_connection(
     mut token_exchanged: bool,
     mut nonce: String, // nonce will be 20 in length
     mut username: String,
-    timer: Timer,
+    mut status_check_timer: i32,
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
     sign_up_username_list_lock: Arc<Mutex<Vec<String>>>,
     mut sign_up_form: SignUpForm,
@@ -79,152 +82,162 @@ pub(crate) async fn client_connection(
         info!("token sent to {}: {}", addr, &token);
     }
 
-    // set status check timer
-    // println!("timer set");
-    timer.schedule_with_delay(STATUS_CHECK_INTERVAL, move || {return;});
+    loop {
+        match timeout(tokio::time::Duration::from_secs(5), receiver.next()).await { // set status check timer
+            Ok(msg) => {
+                // Handle incoming messages
+                match msg.unwrap() {
+                    Ok(Message::Text(text)) => {
+                        debug!("raw Message received from {}: {}", addr, text);
+                        let mut text = String::from(text.as_str());
 
-    // Handle incoming messages
-    while let Some(msg) = receiver.next().await {
-        match msg {
-            Ok(Message::Text(text)) => {
-                debug!("raw Message received from {}: {}", addr, text);
-                let mut text = String::from(text.as_str());
+                        if nonce.as_str() != "-1" {
+                            if text[..20] != nonce {
+                                error!("client {} has invalid nonce: {}", addr, text);
+                                break;
+                            } else {
+                                text = text.replace(nonce.clone().as_str(), "");
+                            }
+                        }
 
-                if nonce.as_str() != "-1" {
-                    if text[..20] != nonce {
-                        error!("client {} has invalid nonce: {}", addr, text);
-                        break;
-                    } else {
-                        text = text.replace(nonce.clone().as_str(), "");
-                    }
-                }
+                        // first digit denotes client screen status
+                        // after reading the first digit get rid of it and pass the rest of the message into the relevant function
+                        // messages sent from both ends should follow a similar format (at least for the first few chars)
 
-                // first digit denotes client screen status
-                // after reading the first digit get rid of it and pass the rest of the message into the relevant function
-                // messages sent from both ends should follow a similar format (at least for the first few chars)
+                        // status check would be done per set time period (2 minutes or something) confirming client status to prevent hacker fuckery
+                        // each screen status (except 0) have a list of items used to do status checks
+                        // in addition to that also a nonce which is a randomly generated string that every message sent up has to attach
+                        // which is just the client pinging the server every set timeframe with the list of items
+                        // if the server does not receive it in a set timeframe or the client's check items/nonce are wrong
+                        // the server closes the connection and the client displays an error and stops functionality
+                        // every status check also updates the clients nonce by replacing it with a new one by the server
+                        // keep in mind that both client and server should have the same values and vars except for the one that they are actively changing
 
-                // status check would be done per set time period (2 minutes or something) confirming client status to prevent hacker fuckery
-                // each screen status (except 0) have a list of items used to do status checks
-                // in addition to that also a nonce which is a randomly generated string that every message sent up has to attach
-                // which is just the client pinging the server every set timeframe with the list of items
-                // if the server does not receive it in a set timeframe or the client's check items/nonce are wrong
-                // the server closes the connection and the client displays an error and stops functionality
-                // every status check also updates the clients nonce by replacing it with a new one by the server
-                // keep in mind that both client and server should have the same values and vars except for the one that they are actively changing
+                        // *** denotes client side tasks
+                        // 0 = token exchange
+                        // 1 = start screen
+                        // 2 = sign up screen
+                        // 3 = store locator
+                        // 4 = main app (the scanning screen)
+                        // 5 = payment screen
+                        // 6 = transferring to till (either by choice or to check id)
+                        // 7 = after payment/logging out
 
-                // *** denotes client side tasks
-                // 0 = token exchange
-                // 1 = start screen
-                // 2 = sign up screen
-                // 3 = store locator
-                // 4 = main app (the scanning screen)
-                // 5 = payment screen
-                // 6 = transferring to till (either by choice or to check id)
-                // 7 = after payment/logging out
+                        // get first char
+                        let first_char = text.chars().next().unwrap();
 
-                // get first char
-                let first_char = text.chars().next().unwrap();
+                        // check if first char denotes the page client should be on
+                        for connection_info in list_lock.lock().await.iter() {
+                            if connection_info.client_addr == addr {
+                                if char::to_digit(first_char, 10).unwrap() as i32 != connection_info.screen.as_i32() {
+                                    error!("client {} has incorrect screen state, exiting", addr);
+                                    return;
+                                }
+                            }
+                        }
 
-                // check if first char denotes the page client should be on
-                for connection_info in list_lock.lock().await.iter() {
-                    if connection_info.client_addr == addr {
-                        if char::to_digit(first_char, 10).unwrap() as i32 != connection_info.screen.as_i32() {
-                            error!("client {} has incorrect screen state, exiting", addr);
-                            return
+                        // get the rest of the string
+                        let msg = text.chars().next().map(|c| &text[c.len_utf8()..]).unwrap().to_string();
+                        // no need to lock anything used here as no message that can interfere with each other should interfere with each other
+
+                        // println!("{}, {}", first_char, msg);
+                        match first_char {
+                            '0' => {
+
+                                // error handling cant be packed into the function :(
+                                if let Err(e) = token_exchange_handler(
+                                    msg.clone(),
+                                    &mut sender,
+                                    &mut token_exchanged,
+                                    &addr,
+                                    &token,
+                                    &mut nonce,
+                                    list_lock.clone(),
+                                ).await {
+                                    // for now every error the server gets would lead to disconnect
+                                    // maybe can implement a tier system later where some lead to retries
+                                    // and others lead to straight disconnects
+
+                                    error!("{}", e);
+                                    break;
+                                };
+
+                                // let result = token_exchange(msg, &token, &mut sender, &addr, &token_exchanged);
+
+                            }
+                            '1' => {
+                                if let Err(e) = start_screen_handler(
+                                    &mut msg.clone(),
+                                    &mut sender,
+                                    &addr,
+                                    &token,
+                                    &mut nonce,
+                                    &mut username,
+                                    &mut status_check_timer,
+                                    list_lock.clone(),
+                                    &mut db,
+                                ).await {
+                                    error!("{}", e);
+                                    break;
+                                }
+                            }
+                            '2' => {
+                                if let Err(e) = sign_up_handler(
+                                    &mut msg.clone(),
+                                    &mut sender,
+                                    &addr,
+                                    &token,
+                                    &mut nonce,
+                                    &mut username,
+                                    &mut status_check_timer,
+                                    list_lock.clone(),
+                                    sign_up_username_list_lock.clone(),
+                                    &mut sign_up_form,
+                                    &mut db,
+                                ).await {
+                                    error!("{}", e);
+                                    break;
+                                }
+                            }
+                            _ => { error!("lol") }
                         }
                     }
-                }
+                    Ok(Message::Binary(_text)) => {
+                        // binary strings are not supported and should not be sent from the front end anyways
+                        // no to mention sending binary in react syntax is send("the string") compared to
+                        // binary which is send(new Blob(["the string"]))
 
-                // get the rest of the string
-                let msg = text.chars().next().map(|c| &text[c.len_utf8()..]).unwrap().to_string();
-                // no need to lock anything used here as no message that can interfere with each other should interfere with each other
-
-                // println!("{}, {}", first_char, msg);
-                match first_char {
-                    '0' => {
-
-                        // error handling cant be packed into the function :(
-                        if let Err(e) = token_exchange_handler(
-                            msg.clone(),
-                            &mut sender,
-                            &mut token_exchanged,
-                            &addr,
-                            &token,
-                            &mut nonce,
-                            list_lock.clone()
-                        ).await{
-                            // for now every error the server gets would lead to disconnect
-                            // maybe can implement a tier system later where some lead to retries
-                            // and others lead to straight disconnects
-
-                            error!("{}", e);
-                            break;
-                        };
-
-                        // let result = token_exchange(msg, &token, &mut sender, &addr, &token_exchanged);
-
-                    },
-                    '1' => { if let Err(e) = start_screen_handler(
-                        &mut msg.clone(),
-                        &mut sender,
-                        &addr,
-                        &token,
-                        &mut nonce,
-                        &mut username,
-                        &timer,
-                        list_lock.clone(),
-                        &mut db
-                    ).await{
-                        error!("{}", e);
-                        break;
-                    } },
-                    '2' => { if let Err(e) = sign_up_handler(
-                        &mut msg.clone(),
-                        &mut sender,
-                        &addr,
-                        &token,
-                        &mut nonce,
-                        &mut username,
-                        &timer,
-                        list_lock.clone(),
-                        sign_up_username_list_lock.clone(),
-                        &mut sign_up_form,
-                        &mut db
-                    ).await{
-                        error!("{}", e);
-                        break;
-                    } },
-                    _ => { error!("lol") }
-                }
-
-            }
-            Ok(Message::Binary(_text)) => {
-                // binary strings are not supported and should not be sent from the front end anyways
-                // no to mention sending binary in react syntax is send("the string") compared to
-                // binary which is send(new Blob(["the string"]))
-
-                if let Err(e) = sender.send(Message::from("are u hacking me UWU")).await {
-                    error!("Error sending message to {}: {}", addr, e);
-                } else {
-                    info!("Sent to {}: are u hacking me UWU", addr);
-                }
-            }
-            Ok(Message::Close(_)) => {
-                let mut list = list_lock.lock().await;
-                for i in 0..list.len() - 1 {
-                    if list[i].client_addr == addr {
-                        list.remove(i);
-                        info!("disconnected connection with {}", addr);
-                        debug!("{:#?}", list);
+                        if let Err(e) = sender.send(Message::from("are u hacking me UWU")).await {
+                            error!("Error sending message to {}: {}", addr, e);
+                        } else {
+                            info!("Sent to {}: are u hacking me UWU", addr);
+                        }
                     }
-                }
-                break
-            },
-            Ok(_) => (),
-            Err(e) => {
-                error!("Error processing message from {}: {}", addr, e);
-                break;
+                    Ok(Message::Close(_)) => {
+                        let mut list = list_lock.lock().await;
+                        for i in 0..list.len() - 1 {
+                            if list[i].client_addr == addr {
+                                list.remove(i);
+                                info!("disconnected connection with {}", addr);
+                                debug!("{:#?}", list);
+                            }
+                        }
+                        break;
+                    }
+                    Ok(_) => (),
+                    Err(e) => {
+                        error!("Error processing message from {}: {}", addr, e);
+                        break;
+                    }
+                };
             }
-        }
+            Err(_) => {
+                status_check_timer += 5;
+                if status_check_timer >= STATUS_CHECK_INTERVAL {
+                    error!("client {} failed to status check, exiting", addr);
+                    break;
+                }
+            }
+        };
     }
 }
