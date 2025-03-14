@@ -20,7 +20,7 @@ use rand::Rng;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
 use chrono::{DateTime, Duration, Utc};
-use futures_util::stream::{Next, SplitStream};
+use futures_util::stream::{Next, SplitSink, SplitStream};
 use rusqlite::Connection;
 use timer::Timer;
 use tokio::sync::oneshot::error::RecvError;
@@ -33,6 +33,7 @@ use crate::login_screen::start_screen_handler;
 use crate::screen_state::ScreenState;
 use crate::sign_up::{sign_up_handler, SignUpForm};
 use crate::{DB_BACKUP_LOCATION, DB_LOCATION, STATUS_CHECK_INTERVAL};
+use crate::store_locator::store_locator_handler;
 use crate::token_exchange::token_exchange_handler;
 
 // note:
@@ -199,6 +200,22 @@ pub(crate) async fn client_connection(
                                     break;
                                 }
                             }
+                            '3' => {
+                                if let Err(e) = store_locator_handler(
+                                    &mut msg.clone(),
+                                    &mut sender,
+                                    &addr,
+                                    &token,
+                                    &mut nonce,
+                                    &username,
+                                    &mut status_check_timer,
+                                    list_lock.clone(),
+                                    &mut db,
+                                ).await {
+                                    error!("{}", e);
+                                    break;
+                                }
+                            }
                             _ => { error!("lol") }
                         }
                     }
@@ -239,5 +256,18 @@ pub(crate) async fn client_connection(
                 }
             }
         };
+    }
+}
+
+pub(crate) async fn update_nonce(nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>, addr: &SocketAddr) -> Result<String, Error> {
+    // generate a new nonce and send it over
+    let mut rng = ChaCha20Rng::from_os_rng();
+    *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
+    if let Err(e) = sender.send(Message::from(format!("STATUS{}", nonce))).await {
+        bail!("failed to send nonce to {}: {}", addr, e);
+    } else {
+        info!("updated nonce sent to {}: {}", addr, nonce);
+        // let _ = Ok::<String, String>("nonce updated".to_string());
+        Ok("STATUS ok".to_string())
     }
 }

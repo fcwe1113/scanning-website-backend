@@ -17,6 +17,7 @@ use tokio_tungstenite::WebSocketStream;
 use tungstenite::{Message, Utf8Bytes};
 use rusqlite::{Connection, fallible_iterator::FallibleIterator};
 use tokio_rustls::server::TlsStream;
+use crate::client_connection::update_nonce;
 use crate::connection_info::ConnectionInfo;
 use crate::screen_state::ScreenState;
 use crate::test;
@@ -75,22 +76,9 @@ async fn start_screen(
     if msg.chars().take(6).collect::<String>() == "STATUS" { // 1b.
         // messages starting with STATUS denotes that this is a regular status check
         let msg = msg.chars().skip(6).collect::<String>();
-        if msg == *token {
-            // resets the timer when the status check is received
-            debug!("status checked for {}", addr);
-            *status_check_timer = 0;
-            // generate a new nonce and send it over
-            let mut rng = ChaCha20Rng::from_os_rng();
-            *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
-            if let Err(e) = sender.send(Message::from(format!("STATUS{}", nonce))).await {
-                bail!("failed to send nonce to {}: {}", addr, e);
-            } else {
-                info!("updated nonce sent to {}: {}", addr, nonce);
-                // let _ = Ok::<String, String>("nonce updated".to_string());
-                Ok("STATUS ok".to_string())
-            }
-        } else {
-            bail!("invalid status check for {}", addr);
+        match token_status_check(msg, token, addr, status_check_timer, nonce, sender).await{
+            Ok(s) => { Ok(s) }
+            Err(e) => { bail!(e) }
         }
     } else if msg.chars().take(5).collect::<String>() == "LOGIN" {
         // messages starting with LOGIN denotes a login request
@@ -273,5 +261,19 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
         Err(e) => {
             bail!(e);
         }
+    }
+}
+
+pub(crate) async fn token_status_check(msg: String, token: &String, addr: &SocketAddr, status_check_timer: &mut i32, nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>) -> Result<String, Error> {
+    if msg == *token {
+        // resets the timer when the status check is received
+        debug!("status checked for {}", addr);
+        *status_check_timer = 0;
+        match update_nonce(nonce, sender, addr).await{
+            Ok(s) => { Ok(s) }
+            Err(e) => { bail!(e); }
+        }
+    } else {
+        bail!("invalid status check for {}", addr);
     }
 }

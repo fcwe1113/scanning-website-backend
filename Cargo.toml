@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 anyhow = { version = "1.0.96" }
-clap = { version = "4.5.30", features = ["derive"] }
 futures-util = { version = "0.3" }
 tokio = { version = "1.0", features = ["full"] }
 tracing = { version = "0.1" }

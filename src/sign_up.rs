@@ -21,7 +21,9 @@ use tokio::{net::TcpStream, sync::Mutex, task};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::Message;
+use crate::client_connection::update_nonce;
 use crate::connection_info::ConnectionInfo;
+use crate::login_screen::token_status_check;
 use crate::screen_state::ScreenState;
 
 struct DbUsername {
@@ -124,22 +126,9 @@ async fn sign_up_screen(
     if msg.chars().take(6).collect::<String>() == "STATUS" {
         // messages starting with STATUS denotes that this is a regular status check
         let msg = msg.chars().skip(6).collect::<String>();
-        if msg == *token { // 2a. checking token
-            // resets the timer when the status check is received
-            debug!("status checked for {}", addr);
-            *status_check_timer = 0;
-            // generate a new nonce and send it over
-            let mut rng = ChaCha20Rng::from_os_rng();
-            *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
-            if let Err(e) = sender.send(Message::from(format!("STATUS{}", nonce))).await {
-                bail!("failed to send nonce to {}: {}", addr, e);
-            } else {
-                info!("updated nonce sent to {}: {}", addr, nonce);
-                // let _ = Ok::<String, String>("nonce updated".to_string());
-                Ok("STATUS ok".to_string())
-            }
-        } else {
-            bail!("invalid status check for {}", addr);
+        match token_status_check(msg, token, addr, status_check_timer, nonce, sender).await{
+            Ok(s) => { Ok(s) }
+            Err(e) => { bail!(e) }
         }
     } else if msg.chars().take(4).collect::<String>() == "NEXT" {
         // messages starting with NEXT means the client is moving onto another page
@@ -185,7 +174,7 @@ async fn sign_up_screen(
         println!("{}", form.dob.to_string());
 
         if !errors.is_empty() {
-            if let Err(e) = sender.send(Message::from(format!("2BADFORM {}", errors))).await{ // 2eI.
+            if let Err(e) = sender.send(Message::from(format!("2BADFORM{}", errors))).await{ // 2eI.
                 bail!("failed to send bad form errors to {}: {}", addr, e);
             } else {
                 return Ok("STATUS ok".parse()?)
@@ -271,6 +260,8 @@ fn sanitize(form: &mut SignUpForm, errors: &mut String) {
         *errors += "username cannot contain control characters\n";
     } else if form.username.contains(char::is_whitespace) {
         *errors += "username cannot contain whitespace characters\n";
+    } else if form.username.contains(|c| String::from("\\{}[]:\"\'").chars().collect::<Vec<char>>().contains(&c)) {
+        *errors += "username contains banned characters (\\{}[]:\"\')\n";
     }
 
     // password (need at least 1 upper and lower case char and a number, and at least 8 long, and limited to (non control)ascii)

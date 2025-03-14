@@ -5,6 +5,7 @@ mod client_connection;
 mod tls_cert_gen;
 mod login_screen;
 mod sign_up;
+mod store_locator;
 
 use crate::client_connection::client_connection;
 use crate::connection_info::ConnectionInfo;
@@ -23,7 +24,6 @@ use axum::{
     handler::Handler
 };
 use axum_server::{Server, tls_rustls::RustlsConfig};
-use clap::builder::Str;
 use futures::{SinkExt, StreamExt};
 use log::{debug, error, info};
 use rand::{
@@ -39,6 +39,7 @@ use rustls::{
 };
 use std::{env, iter, net::SocketAddr, string::String, sync::Arc, time::Duration, collections::HashMap, fs, thread, time};
 use std::str::FromStr;
+use std::sync::RwLock;
 use chrono::{TimeDelta, Utc, NaiveDateTime};
 use futures_util::task::SpawnExt;
 use timer::Timer;
@@ -56,10 +57,11 @@ use warp::Filter;
 use rusqlite::{Connection, Result};
 use serde_json::Value;
 use crate::sign_up::SignUpForm;
+use crate::store_locator::ShopInfo;
 // boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
 
 // compress the folder to deploy to the server (change the ip if needed)
-// then ssh into the server with this line ssh -i "C:\Users\fcwe1113\Downloads\scanning-website-backend.pem" ubuntu@efrgtghyujhygrewds.ip-ddns.com to run the backend
+// then ssh into the server with this line "ssh -i "C:\Users\fcwe1113\Downloads\scanning-website-backend.pem" ubuntu@efrgtghyujhygrewds.ip-ddns.com" to run the backend
 // the aws server will likely run out of memory while compiling the code so run "cargo run --release --jobs 1" to limit memory use while compiling
 
 // the address to bind to aka which address the server listens to
@@ -130,6 +132,15 @@ async fn main() {
         }
     });
 
+    let mut stmt = db.prepare("SELECT name, address FROM Shops").unwrap();
+    let mut shop_list = Arc::new(RwLock::new(stmt.query_map([], |row| {
+        Ok(ShopInfo {
+            name: row.get(0).unwrap(),
+            address: row.get(1).unwrap()
+        })
+    }).unwrap().collect::<Result<Vec<ShopInfo>>>().unwrap()));
+    debug!("shop_list: {:?}", shop_list.read().unwrap());
+    debug!("shop list retrieved");
 
     let mut stmt = db.prepare("SELECT id, name FROM test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
     // to receive select queries from the db the backend will need to prepare spots (aka vars) to store the incoming data
