@@ -32,3 +32,4 @@ rusqlite = { version = "0.34.0", features = ["bundled", "chrono"] }
 argon2 = "0.5.3"
 serde_json = "1.0.140"
 serde-email = "3.1.0"
+serde = { version = "1.0.217", features = ["derive"] }

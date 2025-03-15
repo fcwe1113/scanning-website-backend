@@ -39,13 +39,12 @@ use rustls::{
 };
 use std::{env, iter, net::SocketAddr, string::String, sync::Arc, time::Duration, collections::HashMap, fs, thread, time};
 use std::str::FromStr;
-use std::sync::RwLock;
 use chrono::{TimeDelta, Utc, NaiveDateTime};
 use futures_util::task::SpawnExt;
 use timer::Timer;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::Mutex
+    sync::{Mutex, RwLock}
 };
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use tokio_rustls::{rustls, TlsAcceptor};
@@ -139,7 +138,7 @@ async fn main() {
             address: row.get(1).unwrap()
         })
     }).unwrap().collect::<Result<Vec<ShopInfo>>>().unwrap()));
-    debug!("shop_list: {:?}", shop_list.read().unwrap());
+    debug!("shop_list: {:?}", shop_list.read().await);
     debug!("shop list retrieved");
 
     let mut stmt = db.prepare("SELECT id, name FROM test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
@@ -226,6 +225,7 @@ async fn main() {
                             connections_list_lock.clone(),
                             temp_sign_up_username_list_lock.clone(),
                             SignUpForm::new_empty(),
+                            shop_list.clone(),
                             Connection::open(DB_LOCATION).unwrap()
                         ));
                         // return Response::new(());

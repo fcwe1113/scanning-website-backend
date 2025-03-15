@@ -1,3 +1,5 @@
+use std::fmt;
+use std::fmt::Formatter;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -9,15 +11,18 @@ use rand::Rng;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
 use rusqlite::Connection;
+use serde_json::Value;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio_tungstenite::WebSocketStream;
+use tracing_subscriber::fmt::format;
 use tungstenite::Message;
+use serde::Serialize;
 use crate::client_connection::update_nonce;
 use crate::connection_info::ConnectionInfo;
 use crate::screen_state::ScreenState;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct ShopInfo {
     pub(crate) name: String,
     pub(crate) address: String
@@ -41,22 +46,23 @@ pub(crate) async fn store_locator_handler(
     username: &String,
     status_check_timer: &mut i32,
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
+    shop_list: Arc<RwLock<Vec<ShopInfo>>>,
     db: &mut Connection
 ) -> Result<(), Error> {
 
     // 3 = store locator
         // a. check items: token, username
         // b. do regular status checks until user scans/inputs a store***
-        // c. server pings down the list of stores, starting the chain with "3LIST[first json]", one by one as a JSON with "3[store json]"
-            // each time client replying "3ACK"*** before server sends the next
-            // server tacks on END on the last store on the list like "3[store JSON]END"
-        // d. client then displays the full store list in a drop down***
+        // c. client asks for the list of stores with "3LIST"***
+        // d. server pings down the list of stores, in a json that is just an array of jsons with the header of "list" appended by "3LIST"
+            // each array member will contain "shop_list" and "address"
+        // e. client then displays the full store list in a drop down***
             // if user scans before step c is complete store the scanned value in a buffer and then check against it when step c is done***
-        // e. client then double checks with user on store selection and sends the id of the store as "3STORE[id]" and also stores the store id***
-        // f. server sends an ACK
-        // g. client moves onto the main app***
+        // f. client then double checks with user on store selection and sends the id of the store as "3STORE[id]" and also stores the store id***
+        // g. server sends an ACK
+        // h. client moves onto the main app***
 
-    let result = store_locator_screen(msg, sender, addr, token, nonce, status_check_timer, db, username);
+    let result = store_locator_screen(msg, sender, addr, token, nonce, status_check_timer, shop_list, username);
     if let Err(err) = resolve_result(result, addr, list_lock.clone()).await {
         bail!(err);
     }
@@ -72,7 +78,7 @@ async fn store_locator_screen(
     token: &String,
     nonce: &mut String,
     status_check_timer: &mut i32,
-    db: &mut Connection,
+    shop_list: Arc<RwLock<Vec<ShopInfo>>>,
     username: &String) -> Result<String, Error> {
 
     if msg.chars().take(6).collect::<String>() == "STATUS" {
@@ -89,8 +95,25 @@ async fn store_locator_screen(
         } else {
             bail!("invalid status check for {}", addr);
         }
+    } else if msg == "ACK" {
+        Ok("STATUS ok".to_string())
+    } else if msg == "LIST" {
+        let mut json_list = String::from("{
+        \"list\": [\n"); // somewhere here has bad syntax
+        for shop in shop_list.read().await.iter() {
+            json_list = format!("{}{},", json_list, serde_json::to_string(shop)?);
+        }
+        json_list.pop();
+        json_list = format!("{}]}}", json_list);
+
+        // println!("{}", json_list);
+        if let Err(e) = sender.send(Message::from(format!("3LIST{}", json_list))).await {
+            bail!("Error sending shop list to {}: {}", addr, e);
+        }
+        debug!("shop list sent to {}", addr);
+        Ok("STATUS ok".to_string())
     } else {
-        bail!("sign up screen received invalid message from {}: {}", addr, msg);
+        bail!("store locator screen received invalid message from {}: {}", addr, msg);
     }
 }
 

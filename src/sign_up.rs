@@ -102,7 +102,18 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
     // debug!("Starting screen handler received {}", msg);
     // println!("{}", msg.chars().take(5).collect::<String>());
     // println!("{}", msg);
-    let result = sign_up_screen(msg, sender, addr, token, nonce, status_check_timer, db, sign_up_form, session_username, sign_up_username_list_lock);
+    let result = sign_up_screen(
+        msg,
+        sender,
+        addr,
+        token,
+        nonce,
+        status_check_timer,
+        db,
+        sign_up_form,
+        session_username,
+        sign_up_username_list_lock
+    );
     if let Err(err) = resolve_result(result, addr, list_lock.clone()).await {
         bail!(err);
     }
@@ -145,7 +156,6 @@ async fn sign_up_screen(
                     if let Err(_) = sender.send(Message::from("2NEXT3")).await { // 2i.
                         bail!("failed to send moving on message to {}", addr);
                     }
-
                     Ok(Ok::<String, Error>("moving to store locator".to_string()).expect(""))
                 } else {
                     bail!("invalid session username for client {}", addr);

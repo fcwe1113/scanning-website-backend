@@ -2754,6 +2754,7 @@ dependencies = [
  "rand_chacha 0.9.0",
  "rusqlite",
  "rustls 0.23.23",
+ "serde",
  "serde-email",
  "serde_json",
  "timer",

@@ -1,5 +1,6 @@
 use std::{fs, net::SocketAddr, sync::Arc, thread};
 use std::future::Future;
+use std::ops::Add;
 use std::task::Poll;
 use anyhow::{bail, Error};
 use futures_util::{SinkExt, StreamExt};
@@ -24,6 +25,7 @@ use futures_util::stream::{Next, SplitSink, SplitStream};
 use rusqlite::Connection;
 use timer::Timer;
 use tokio::sync::oneshot::error::RecvError;
+use tokio::sync::RwLock;
 use tokio::time::{timeout, Timeout};
 use tokio::time::error::Elapsed;
 use tokio_rustls::TlsAcceptor;
@@ -32,8 +34,8 @@ use crate::connection_info::ConnectionInfo;
 use crate::login_screen::start_screen_handler;
 use crate::screen_state::ScreenState;
 use crate::sign_up::{sign_up_handler, SignUpForm};
-use crate::{DB_BACKUP_LOCATION, DB_LOCATION, STATUS_CHECK_INTERVAL};
-use crate::store_locator::store_locator_handler;
+use crate::STATUS_CHECK_INTERVAL;
+use crate::store_locator::{store_locator_handler, ShopInfo};
 use crate::token_exchange::token_exchange_handler;
 
 // note:
@@ -52,6 +54,7 @@ pub(crate) async fn client_connection(
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
     sign_up_username_list_lock: Arc<Mutex<Vec<String>>>,
     mut sign_up_form: SignUpForm,
+    shop_list: Arc<RwLock<Vec<ShopInfo>>>,
     mut db: Connection
 ) {
     // note we dont want to lock the list and pass the list in by ref
@@ -210,6 +213,7 @@ pub(crate) async fn client_connection(
                                     &username,
                                     &mut status_check_timer,
                                     list_lock.clone(),
+                                    shop_list.clone(),
                                     &mut db,
                                 ).await {
                                     error!("{}", e);

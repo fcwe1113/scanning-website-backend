@@ -31,6 +31,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
                                           session_username: &mut String,
                                           status_check_timer: &mut i32,
                                           list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
+
                                           db: &mut Connection
 ) -> Result<(), Error>{
 
@@ -240,6 +241,7 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
                         }
                     }
                     info!("moving client {} onto store locator screen", addr);
+
                     Ok(())
                 },
                 "STATUS ok" => {
