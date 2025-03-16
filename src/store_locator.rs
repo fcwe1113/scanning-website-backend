@@ -98,13 +98,15 @@ async fn store_locator_screen(
     } else if msg == "ACK" {
         Ok("STATUS ok".to_string())
     } else if msg == "LIST" {
-        let mut json_list = String::from("{
-        \"list\": [\n"); // somewhere here has bad syntax
+        let mut json_list = String::from("{\"list\": ["); // somewhere here has bad syntax
         for shop in shop_list.read().await.iter() {
+            // println!("{}", serde_json::to_string(shop)?);
             json_list = format!("{}{},", json_list, serde_json::to_string(shop)?);
         }
+
         json_list.pop();
         json_list = format!("{}]}}", json_list);
+        println!("{}", json_list);
 
         // println!("{}", json_list);
         if let Err(e) = sender.send(Message::from(format!("3LIST{}", json_list))).await {
