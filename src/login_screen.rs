@@ -150,14 +150,14 @@ async fn start_screen(
                 if let Err(_) = sender.send(Message::from("1NEXT2")).await {
                     bail!("failed to send moving on message to {}", addr);
                 }
-                Ok(Ok::<String, Error>("moving to sign up".to_string()).expect(""))
+                Ok("moving to sign up".to_string())
             }
             "3" => { // moving onto store locator
                 if msg.chars().skip(5).collect::<String>() == *session_username {
                     if let Err(_) = sender.send(Message::from("1NEXT3")).await {
                         bail!("failed to send moving on message to {}", addr);
                     }
-                    Ok(Ok::<String, Error>("moving to store locator".to_string()).expect(""))
+                    Ok("moving to store locator".to_string())
                 } else {
                     bail!("invalid session username for client {} on login", addr);
                 }

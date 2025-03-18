@@ -6,6 +6,7 @@ mod tls_cert_gen;
 mod login_screen;
 mod sign_up;
 mod store_locator;
+mod main_app;
 
 use crate::client_connection::client_connection;
 use crate::connection_info::ConnectionInfo;
@@ -47,7 +48,7 @@ use tokio::{
     sync::{Mutex, RwLock}
 };
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
-use tokio_rustls::{rustls, TlsAcceptor};
+use tokio_rustls::{rustls, TlsAcceptor, TlsStream};
 use tokio_rustls_acme::acme::ChallengeType;
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
 use tungstenite::Utf8Bytes;
@@ -179,8 +180,14 @@ async fn main() {
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                let incoming_addr = stream.peer_addr().unwrap(); // get the client ip now because thats not possible after the connection is upgraded to TLS
-                // let stream = tls_acceptor.accept(stream).await.unwrap(); // upgrading the connection to TLS
+                let incoming_addr = match stream.peer_addr().unwrap() { // get the client ip now because thats not possible after the connection is upgraded to TLS
+                    SocketAddr::V4(v4addr) => {debug!("V4"); SocketAddr::from(v4addr)}
+                    SocketAddr::V6(v6addr) => {debug!("V6"); SocketAddr::from(v6addr)}
+                };
+                // let stream = match tls_acceptor.accept(stream).await {
+                //     Ok(stream) => {stream}
+                //     Err(e) => {error!("Error on tls handshake for client {}: {}", incoming_addr, e); break;}
+                // };
 
                 let mut is_duplicate = false;
 
@@ -226,6 +233,7 @@ async fn main() {
                             temp_sign_up_username_list_lock.clone(),
                             SignUpForm::new_empty(),
                             shop_list.clone(),
+                            -1,
                             Connection::open(DB_LOCATION).unwrap()
                         ));
                         // return Response::new(());
