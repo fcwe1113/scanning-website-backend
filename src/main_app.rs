@@ -142,7 +142,7 @@ async fn main_app_screen(
                     age_limit: match row.get(3) {
                         Ok(i) => match i {
                             None => 0,
-                            _ => i.expect("lol"), // todo may not be functional
+                            _ => i.expect("lol"), // expect only here to shut the compiler up
                         },
                         _ => { 0 }
                     },
