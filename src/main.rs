@@ -14,7 +14,7 @@ use crate::screen_state::ScreenState;
 use crate::tls_cert_gen::{generate_acme_cert, generate_self_signed_cert};
 use crate::token_exchange::*;
 use acme2::{AccountBuilder, DirectoryBuilder, OrderBuilder};
-use anyhow::Context;
+use anyhow::{bail, Context, Error};
 use axum::{
     http::{Response, StatusCode},
     response::IntoResponse,
@@ -39,14 +39,13 @@ use rustls::{
     crypto::CryptoProvider
 };
 use std::{env, iter, net::SocketAddr, string::String, sync::Arc, time::Duration, collections::HashMap, fs, thread, time};
+use std::future::Future;
+use std::ptr::read;
 use std::str::FromStr;
-use chrono::{TimeDelta, Utc, NaiveDateTime};
+use chrono::{TimeDelta, Utc, NaiveDateTime, Local};
 use futures_util::task::SpawnExt;
 use timer::Timer;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    sync::{Mutex, RwLock}
-};
+use tokio::{net::{TcpListener, TcpStream}, sync::{Mutex, RwLock}, task};
 use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
 use tokio_rustls::{rustls, TlsAcceptor, TlsStream};
 use tokio_rustls_acme::acme::ChallengeType;
@@ -56,6 +55,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use warp::Filter;
 use rusqlite::{Connection, Result};
 use serde_json::Value;
+use crate::main_app::CheckoutList;
 use crate::sign_up::SignUpForm;
 use crate::store_locator::ShopInfo;
 // boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
@@ -127,20 +127,37 @@ async fn main() {
     thread::spawn(|| { // thread to backup the db every 3 hrs
         loop{
             let _ = fs::copy(DB_LOCATION, DB_BACKUP_LOCATION); // yes it panics and crashes if it cant copy, no its not a bug its a feature
-            info!("DB backed up");
+            info!("DB backed up on {}", Local::now());
             thread::sleep(Duration::from_secs(10800)); // thats 3 hours worth of seconds
         }
     });
 
-    let mut stmt = db.prepare("SELECT name, address FROM Shops").unwrap();
-    let mut shop_list = Arc::new(RwLock::new(stmt.query_map([], |row| {
-        Ok(ShopInfo {
-            name: row.get(0).unwrap(),
-            address: row.get(1).unwrap()
-        })
-    }).unwrap().collect::<Result<Vec<ShopInfo>>>().unwrap()));
-    debug!("shop_list: {:?}", shop_list.read().await);
-    debug!("shop list retrieved");
+    let shop_list: Arc<RwLock<Vec<ShopInfo>>> = Default::default();
+    async fn shop_list_update(shop_list: Arc<RwLock<Vec<ShopInfo>>>) -> Result<(), Error> {
+        let mut db = Connection::open(DB_LOCATION)?;
+        loop{
+            let temp_list = task::block_in_place(|| {
+                let mut stmt = db.prepare("SELECT name, address FROM Shops").unwrap();
+                return stmt.query_map([], |row| {
+                    Ok(ShopInfo {
+                        name: row.get(0).unwrap(),
+                        address: row.get(1).unwrap()
+                    })
+                }).unwrap().collect::<Result<Vec<ShopInfo>>>().unwrap();
+            });
+            if temp_list.is_empty() {
+                bail!("shop list is empty, indicating db is corrupted, exiting");
+            }
+            {
+                let mut list = shop_list.write().await;
+                *list = temp_list;
+            }
+            info!("shop list retrieved on {}", Local::now());
+            tokio::time::sleep(Duration::from_secs(86400)).await; // thats 1 day worth of seconds
+        }
+    }
+    // thread to update the shop list every day
+    tokio::spawn(shop_list_update(shop_list.clone()));
 
     let mut stmt = db.prepare("SELECT id, name FROM test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
     // to receive select queries from the db the backend will need to prepare spots (aka vars) to store the incoming data
@@ -195,7 +212,7 @@ async fn main() {
                 // we loop thru the connections list and if the ip is already on the list we drop the request
                 // AAAANNNNDDDD it doesnt work as react connects in with different port for each connection
                 // AAAANNNNDDDD it just uses the first connection and ignores the second connection memory leak style
-                // todo0
+                // todo(done)
                 // either disable this dickish behaviour in react or somehow find a way to disconnect the redundant connection here
                 // disabled it on react by disabling strict mode yaaaaaaaaaaaaaaayyyyyy
                 // the duplicate check is kept in in case of other shenanigans that can happen with duplicate client ips
@@ -234,6 +251,7 @@ async fn main() {
                             SignUpForm::new_empty(),
                             shop_list.clone(),
                             -1,
+                            CheckoutList::new_empty(),
                             Connection::open(DB_LOCATION).unwrap()
                         ));
                         // return Response::new(());

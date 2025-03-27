@@ -97,12 +97,11 @@ async fn start_screen(
                 hash: String,
             }
             let mut stmt = db.prepare("SELECT password FROM Users WHERE username = ?1 AND TIME(dob) = \"00:00:00\";").unwrap();
-            let query_iter = stmt.query_map([login_username.clone()], |row| {
+            return stmt.query_map([login_username.clone()], |row| {
                 Ok(Password {
                     hash: row.get(0).unwrap(),
                 })
-            }).unwrap();
-            return query_iter.collect::<Result<Vec<_>, _>>().unwrap();
+            }).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
         });
 
         // error flag to show if login failed

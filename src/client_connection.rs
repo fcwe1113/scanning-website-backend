@@ -32,7 +32,7 @@ use tokio_rustls::TlsAcceptor;
 use tracing_subscriber::layer::Identity;
 use crate::connection_info::ConnectionInfo;
 use crate::login_screen::start_screen_handler;
-use crate::main_app::main_app_handler;
+use crate::main_app::{main_app_handler, CheckoutList};
 use crate::screen_state::ScreenState;
 use crate::sign_up::{sign_up_handler, SignUpForm};
 use crate::STATUS_CHECK_INTERVAL;
@@ -57,6 +57,7 @@ pub(crate) async fn client_connection(
     mut sign_up_form: SignUpForm,
     shop_list: Arc<RwLock<Vec<ShopInfo>>>,
     mut shop_id: i32,
+    mut checkout_list: CheckoutList,
     mut db: Connection
 ) {
     // note we dont want to lock the list and pass the list in by ref
@@ -234,6 +235,7 @@ pub(crate) async fn client_connection(
                                     &mut status_check_timer,
                                     list_lock.clone(),
                                     &mut shop_id,
+                                    &mut checkout_list,
                                     &mut db,
                                 ).await {
                                     error!("{}", e);
