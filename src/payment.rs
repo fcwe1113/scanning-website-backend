@@ -41,9 +41,8 @@ pub(crate) async fn payment_handler(
         // if by card it checks field validity then responds complete
     // f. backend saves the checkout list in db
     // g. if backend responds "5SUCCESS" front end show success message, if a "5FAIL" is sent show an error and let the user try again
-    // h. if user clicks transfer to till (willing or not) client sends "3TRANSFER"
-    // i. client then has to scan a qr code on their (imaginary) till and it contains "5TILL[till token]"
-    // j. backend just takes that in and replies "5OK"
+    // h. if user clicks transfer to till (willing or not) client has to scan a qr code and send "5TRANSFER[till token]"
+    // j. backend just takes that in and replies "5OK", if sent an invalid till token reply "5INVALID"
 
     let result = payment_screen(msg, sender, addr, token, nonce, status_check_timer, shop_id, username, checkout_list, db);
     if let Err(err) = resolve_result(result, addr, list_lock.clone()).await {
@@ -81,14 +80,30 @@ async fn payment_screen(
             bail!("invalid status check for {}", addr);
         }
     } else if msg == "APPLE" {
+        if checkout_list.force_till() {
+            bail!("client {} refuses to use till for age limited items, exiting", addr);
+        }
         info!("client {} paid via apple pay", addr);
         // todo count stock
         sender.send(Message::from("5SUCCESS")).await?;
         Ok("STATUS ok".to_string())
     } else if msg == "GOOGLE" {
+        if checkout_list.force_till() {
+            bail!("client {} refuses to use till for age limited items, exiting", addr);
+        }
         info!("client {} paid via google pay", addr);
         // todo count stock
         sender.send(Message::from("5SUCCESS")).await?;
+        Ok("STATUS ok".to_string())
+    } else if msg.chars().take(8).collect::<String>() == "TRANSFER" {
+        let token = msg.chars().skip(8).collect::<String>();
+        if token.len() != 10 { // just say the token has to be 10 long for now
+            info!("client {} gave invalid till token", addr);
+            sender.send(Message::from("5INVALID")).await?;
+        } else {
+            info!("client {} transferred to till via token {}", addr, token);
+            sender.send(Message::from("5OK")).await?;
+        }
         Ok("STATUS ok".to_string())
     } else {
         bail!("payment screen received invalid message from {}: {}", addr, msg);

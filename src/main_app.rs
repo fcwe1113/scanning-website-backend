@@ -56,6 +56,15 @@ impl CheckoutList {
             self.total += item.quantity * item.price;
         }
     }
+
+    pub(crate) fn force_till(&mut self) -> bool {
+        for item in self.list {
+            if item.age_limit != 0 {
+                return true
+            }
+        }
+        false
+    }
 }
 
 pub(crate) async fn main_app_handler(
