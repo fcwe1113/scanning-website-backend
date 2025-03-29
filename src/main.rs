@@ -7,6 +7,7 @@ mod login_screen;
 mod sign_up;
 mod store_locator;
 mod main_app;
+mod payment;
 
 use crate::client_connection::client_connection;
 use crate::connection_info::ConnectionInfo;

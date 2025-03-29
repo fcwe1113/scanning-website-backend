@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task;
+use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tracing::field::debug;
 use tungstenite::Message;
@@ -19,7 +20,7 @@ use crate::connection_info::ConnectionInfo;
 use crate::screen_state::ScreenState;
 
 #[derive(Serialize, Deserialize, Debug)]
-struct ItemInfo {
+pub(crate) struct ItemInfo {
     id: i32,
     name: String,
     price: f64,
@@ -36,8 +37,8 @@ impl ItemInfo {
 
 #[derive(Deserialize)]
 pub(crate) struct CheckoutList {
-    list: Vec<ItemInfo>,
-    total: f64,
+    pub(crate) list: Vec<ItemInfo>,
+    pub(crate) total: f64,
 }
 
 impl CheckoutList {
@@ -210,8 +211,9 @@ async fn main_app_screen(
             temp_total += item.price * item.quantity;
 
         }
+        temp_total = (temp_total * 100.0).round() / 100.0;
 
-        if temp_total != total { // if client sent wrong total then they are a naughty hacker
+        if (temp_total) != total { // if client sent wrong total then they are a naughty hacker
             bail!("client {} sent incorrect total: temp: {} correct: {}", addr, total, temp_total);
         }
 
