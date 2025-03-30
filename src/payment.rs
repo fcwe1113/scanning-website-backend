@@ -219,8 +219,4 @@ async fn checkout(list: &CheckoutList, username: &String, shop_id: &i32, db: &mu
 
     // db.execute("COMMIT;", []).unwrap();
     tx.commit().unwrap();
-
-    // todo store purchase records and count stock
-    // todo a mutex transaction row id to prevent threads clashing to use the same transaction id
-    // todo compile the list of items into a suitable list of sql commands surrounded with transaction
 }
