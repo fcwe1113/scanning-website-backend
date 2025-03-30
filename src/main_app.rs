@@ -21,12 +21,12 @@ use crate::screen_state::ScreenState;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct ItemInfo {
-    id: i32,
+    pub(crate) id: i32,
     name: String,
     price: f64,
     age_limit: i32,
     divisible: bool,
-    quantity: f64,
+    pub(crate) quantity: f64,
 }
 
 impl ItemInfo {
@@ -58,7 +58,7 @@ impl CheckoutList {
     }
 
     pub(crate) fn force_till(&mut self) -> bool {
-        for item in self.list {
+        for item in &self.list {
             if item.age_limit != 0 {
                 return true
             }

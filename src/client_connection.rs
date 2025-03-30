@@ -59,7 +59,7 @@ pub(crate) async fn client_connection(
     shop_list: Arc<RwLock<Vec<ShopInfo>>>,
     mut shop_id: i32,
     mut checkout_list: CheckoutList,
-    mut db: Connection
+    mut db: Connection,
 ) {
     // note we dont want to lock the list and pass the list in by ref
     // do that and only one client can access the list until it dcs

@@ -55,7 +55,9 @@ use tungstenite::Utf8Bytes;
 use unicode_segmentation::UnicodeSegmentation;
 use warp::Filter;
 use rusqlite::{Connection, Result};
+use rusqlite::fallible_iterator::FallibleIterator;
 use serde_json::Value;
+use warp::hyper::body::HttpBody;
 use crate::main_app::CheckoutList;
 use crate::sign_up::SignUpForm;
 use crate::store_locator::ShopInfo;
@@ -160,10 +162,11 @@ async fn main() {
     // thread to update the shop list every day
     tokio::spawn(shop_list_update(shop_list.clone()));
 
-    let mut stmt = db.prepare("SELECT id, name FROM test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
+    // let mut stmt = db.prepare("SELECT id, name FROM test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
     // to receive select queries from the db the backend will need to prepare spots (aka vars) to store the incoming data
     // .query_map() is the executor of the command
     // below we used a self defined struct to store incoming data but theoretically cant u just add the strings together and decipher them the other end?
+    let mut stmt = db.prepare("SELECT id, name FROM test").unwrap();
     let query_iter = stmt.query_map([], |row| {
         Ok(test {
             id: row.get(0).unwrap(),
@@ -176,16 +179,11 @@ async fn main() {
         println!("{}|{}", e.id, e.name);
     }
 
-    let mut ans = db.prepare("SELECT name FROM test WHERE id = '01';").unwrap();
-    let ans = ans.query_map([], |row| {Ok(row.get(0).unwrap())}).unwrap();
-    let mut output = String::new();
-    for a in ans {
-        output = a.unwrap();
-    }
-    println!("{}", output);
-    output += &*String::from(output.chars().last().unwrap());
+    stmt = db.prepare("SELECT name FROM test WHERE id = '01';").unwrap();
+    let ans = stmt.query_map([], |row| {Ok(row.get(0).unwrap())}).unwrap().collect::<Result<Vec<String>>>().unwrap();
+    let ans = &ans[0];
     // ? are holes you fill into the statement (prepared statements)
-    db.execute("UPDATE test SET name = ?1 WHERE id = '01';", [output]).unwrap();
+    db.execute("UPDATE test SET name = ?1 WHERE id = '01';", [ans]).unwrap();
 
     // Create the TCP listener
     let listener = TcpListener::bind(&LISTENER_ADDR).await.expect("Failed to bind");
@@ -253,7 +251,7 @@ async fn main() {
                             shop_list.clone(),
                             -1,
                             CheckoutList::new_empty(),
-                            Connection::open(DB_LOCATION).unwrap()
+                            Connection::open(DB_LOCATION).unwrap(),
                         ));
                         // return Response::new(());
                     } else {
