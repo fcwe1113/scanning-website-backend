@@ -149,15 +149,17 @@ async fn sign_up_screen(
             }
         }
     } else if msg.chars().take(5).collect::<String>() == "CHECK" {
-        let json: Value = serde_json::from_str(msg.chars().skip(5).collect::<String>().as_str())?;
-        let mut form = SignUpForm {
-            username: json["username"].to_string(),
-            password: json["password"].to_string(),
-            first_name: json["first_name"].to_string(),
-            last_name: json["last_name"].to_string(),
-            dob_string: json["dob"].to_string(),
-            dob: NaiveDateTime::MIN, // just filling it with something to shut the compiler up
-            email: json["email"].to_string(),
+        let mut form = match serde_json::from_str::<Value>(msg.chars().skip(5).collect::<String>().as_str()) {
+            Ok(json) => { SignUpForm {
+                username: json["username"].to_string(),
+                password: json["password"].to_string(),
+                first_name: json["first_name"].to_string(),
+                last_name: json["last_name"].to_string(),
+                dob_string: json["dob"].to_string(),
+                dob: NaiveDateTime::MIN, // just filling it with something to shut the compiler up
+                email: json["email"].to_string(),
+            } },
+            Err(e) => { bail!("client {} sent invalid sign up form: {}", addr, e) }
         };
         form.remove_quotes();
 
@@ -167,11 +169,8 @@ async fn sign_up_screen(
         println!("{}", form.dob.to_string());
 
         if !errors.is_empty() {
-            if let Err(e) = sender.send(Message::from(format!("2BADFORM{}", errors))).await{ // 2eI.
-                bail!("failed to send bad form errors to {}: {}", addr, e);
-            } else {
-                return Ok("STATUS ok".parse()?)
-            }
+            sender.send(Message::from(format!("2BADFORM{}", errors))).await?; // 2eI.
+            return Ok("STATUS ok".parse()?)
         }
 
         let result = task::block_in_place(|| { // 2f. check username against db

@@ -62,7 +62,7 @@ async fn token_exchange(
     if msg == "NEXT" {
         // debug!("{}", flag.to_string());
         if *flag { // 0h check flag
-            if let Err(_e) = sender.send(Message::Text(Utf8Bytes::from("0NEXT"))).await /*0h ack*/ {}
+            sender.send(Message::Text(Utf8Bytes::from("0NEXT"))).await?; //0h ack
             Ok(String::from("moving on"))
         } else {
             bail!("client {addr} tries to move to start screen before token was exchanged") // 0h error handling
@@ -71,13 +71,10 @@ async fn token_exchange(
         let mut rng = ChaCha20Rng::from_os_rng();
 
         *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
+        sender.send(Message::from(format!("0{}", nonce))).await?; //0f ack
+        info!("nonce sent to {}: {}", addr, nonce);
+        Ok(String::from("token ackked"))
 
-        if let Err(e) = sender.send(Message::from(format!("0{}", nonce))).await /*0f ack*/ {
-            bail!("failed to send nonce to {}: {}", addr, e);
-        } else {
-            info!("nonce sent to {}: {}", addr, nonce);
-            Ok(String::from("token ackked"))
-        }
     } else {
         bail!("client {addr} token mismatch, are you a naughty hacker?")
     }
@@ -100,7 +97,7 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
                     }
                     Ok(())
                 },
-                "moving on" => { // 0h moving on todo
+                "moving on" => { // 0h moving on
                     for connection_info in list_lock.lock().await.iter_mut() {
                         if connection_info.client_addr == *addr {
                             connection_info.screen = ScreenState::Start;

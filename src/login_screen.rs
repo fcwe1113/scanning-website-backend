@@ -121,20 +121,14 @@ async fn start_screen(
         // if the error flag is true that means the login failed
         // otherwise it meant the login succeeded
         if error {
-            if let Err(e) = sender.send(Message::from("1FAIL")).await { // 1cA3. pings login fail message
-                bail!("failed to send login error to {}: {}", addr, e);
-            } else {
-                info!("login error sent to {}", addr);
-                Ok("login fail".to_string())
-            }
+            sender.send(Message::from("1FAIL")).await?; // 1cA3. pings login fail message
+            info!("login error sent to {}", addr);
+            Ok("login fail".to_string())
         } else {
-            if let Err(e) = sender.send(Message::from("1OK")).await { // 1cA3. pings login success message
-                bail!("failed to send login sucess to {}: {}", addr, e);
-            } else {
-                info!("login success for {} as {}", addr, login_username);
-                *session_username = login_username;
-                Ok("login success".to_string())
-            }
+            sender.send(Message::from("1OK")).await?; // 1cA3. pings login success message
+            info!("login success for {} as {}", addr, login_username);
+            *session_username = login_username;
+            Ok("login success".to_string())
         }
 
     } else if msg.chars().take(4).collect::<String>() == "NEXT" {
@@ -142,16 +136,12 @@ async fn start_screen(
         let dest = msg.chars().skip(4).take(1).collect::<String>();
         match dest.as_str() {
             "2" => { // moving onto sign up page
-                if let Err(_) = sender.send(Message::from("1NEXT2")).await {
-                    bail!("failed to send moving on message to {}", addr);
-                }
+                sender.send(Message::from("1NEXT2")).await?;
                 Ok("moving to sign up".to_string())
             }
             "3" => { // moving onto store locator
                 if msg.chars().skip(5).collect::<String>() == *session_username {
-                    if let Err(_) = sender.send(Message::from("1NEXT3")).await {
-                        bail!("failed to send moving on message to {}", addr);
-                    }
+                    sender.send(Message::from("1NEXT3")).await?;
                     Ok("moving to store locator".to_string())
                 } else {
                     bail!("invalid session username for client {} on login", addr);

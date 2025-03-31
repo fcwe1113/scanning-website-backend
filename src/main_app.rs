@@ -169,7 +169,10 @@ async fn main_app_screen(
     } else if msg.chars().take(8).collect::<String>() == "CHECKOUT" {
 
         // info!("checkout list: {}", msg.chars().skip(8).collect::<String>());
-        let list: CheckoutList = serde_json::from_str(&msg.chars().skip(8).collect::<String>())?;
+        let list: CheckoutList = match serde_json::from_str(&msg.chars().skip(8).collect::<String>()) {
+            Ok(l) => l,
+            Err(e) => {bail!("client {} sent invalid checkout list: {}", addr, e);}
+        };
         let total = list.total;
         let list: Vec<ItemInfo> = list.list;
 

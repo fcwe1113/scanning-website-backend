@@ -144,12 +144,18 @@ async fn payment_screen(
         }
 
         info!("received card info: {}", msg.chars().skip(4).collect::<String>());
-        let card: CardInfo = serde_json::from_str(&msg.chars().skip(4).collect::<String>())?;
+        let card: CardInfo = match serde_json::from_str(&msg.chars().skip(4).collect::<String>()) {
+            Ok(card) => card,
+            Err(e) => {bail!("client {} sent invalid card json: {}", addr, e)}
+        };
 
         let mut error = false;
         match card.number.parse::<CreditCard>() {
             Ok(_) => {}
             Err(_) => {
+                if !card.number.chars().all(char::is_numeric) {
+                    bail!("client {} bypassed frontend sanitation", addr);
+                }
                 sender.send(Message::from("5INVALID")).await?;
                 error = true;
             }
