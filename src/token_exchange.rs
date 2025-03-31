@@ -1,20 +1,14 @@
-use std::future::Future;
-use std::iter;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{future::Future, iter, net::SocketAddr, sync::Arc};
 use anyhow::{bail, Error};
-use futures_util::SinkExt;
-use futures_util::stream::SplitSink;
+use futures_util::{SinkExt, stream::SplitSink};
 use log::{debug, error, info};
 use rand::Rng;
-use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::SeedableRng;
+use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
 use tokio::{net::TcpStream, sync::Mutex};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::{Message, Utf8Bytes};
-use crate::connection_info::ConnectionInfo;
-use crate::screen_state::ScreenState;
+use crate::{connection_info::ConnectionInfo, screen_state::ScreenState};
 
 // messages sent from both ends should follow a similar format (at least for the first few chars)
 // *** denotes client side tasks
@@ -36,7 +30,7 @@ use crate::screen_state::ScreenState;
 
 pub(crate) async fn token_exchange_handler(
     msg: String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     token_exchanged: &mut bool,
     addr: &SocketAddr,
     token: &String,
@@ -59,7 +53,7 @@ pub(crate) async fn token_exchange_handler(
 async fn token_exchange(
     msg: String,
     token: &String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     flag: &bool,
     nonce: &mut String

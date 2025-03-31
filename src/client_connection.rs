@@ -1,44 +1,25 @@
-use std::{fs, net::SocketAddr, sync::Arc, thread};
-use std::future::Future;
-use std::ops::Add;
-use std::task::Poll;
+use std::{net::SocketAddr, sync::Arc};
 use anyhow::{bail, Error};
 use futures_util::{SinkExt, StreamExt};
 use log::{debug, error, info};
-use openssl::{
-    encrypt::Decrypter,
-    pkey::{PKey, Private},
-    rsa::{Padding, Rsa}
-};
-use tokio::{net::TcpStream, sync::Mutex};
+use tokio::{net::TcpStream, sync::{Mutex, RwLock}, time::timeout};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::{accept_async, WebSocketStream};
-use tungstenite::{Message, Utf8Bytes};
-use base64::decode;
-use openssl::aes::AesKey;
-use openssl::hash::MessageDigest;
+use tungstenite::Message;
 use rand::Rng;
-use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::SeedableRng;
-use chrono::{DateTime, Duration, Utc};
-use futures_util::stream::{Next, SplitSink, SplitStream};
+use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
+use futures_util::stream::SplitSink;
 use rusqlite::Connection;
-use timer::Timer;
-use tokio::sync::oneshot::error::RecvError;
-use tokio::sync::RwLock;
-use tokio::time::{timeout, Timeout};
-use tokio::time::error::Elapsed;
-use tokio_rustls::TlsAcceptor;
-use tracing_subscriber::layer::Identity;
-use crate::connection_info::ConnectionInfo;
-use crate::login_screen::start_screen_handler;
-use crate::main_app::{main_app_handler, CheckoutList};
-use crate::payment::payment_handler;
-use crate::screen_state::ScreenState;
-use crate::sign_up::{sign_up_handler, SignUpForm};
-use crate::STATUS_CHECK_INTERVAL;
-use crate::store_locator::{store_locator_handler, ShopInfo};
-use crate::token_exchange::token_exchange_handler;
+use crate::{
+    connection_info::ConnectionInfo,
+    login_screen::start_screen_handler,
+    main_app::{main_app_handler, CheckoutList},
+    payment::payment_handler,
+    sign_up::{sign_up_handler, SignUpForm},
+    STATUS_CHECK_INTERVAL,
+    store_locator::{store_locator_handler, ShopInfo},
+    token_exchange::token_exchange_handler
+};
 
 // note:
 // i tried to pass in the vector element reference but to no avail
@@ -46,7 +27,7 @@ use crate::token_exchange::token_exchange_handler;
 // which im not
 // for now every change to the list requires a mutex lock
 pub(crate) async fn client_connection(
-    stream: TcpStream,
+    stream: TlsStream<TcpStream>,
     addr: SocketAddr,
     token: String,
     mut token_exchanged: bool,
@@ -219,7 +200,6 @@ pub(crate) async fn client_connection(
                                     list_lock.clone(),
                                     shop_list.clone(),
                                     &mut shop_id,
-                                    &mut db,
                                 ).await {
                                     error!("{}", e);
                                     break;
@@ -252,7 +232,6 @@ pub(crate) async fn client_connection(
                                     &mut nonce,
                                     &username,
                                     &mut status_check_timer,
-                                    list_lock.clone(),
                                     &mut shop_id,
                                     &mut checkout_list,
                                     &mut db,
@@ -304,7 +283,7 @@ pub(crate) async fn client_connection(
     }
 }
 
-pub(crate) async fn update_nonce(nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>, addr: &SocketAddr) -> Result<String, Error> {
+pub(crate) async fn update_nonce(nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>, addr: &SocketAddr) -> Result<String, Error> {
     // generate a new nonce and send it over
     let mut rng = ChaCha20Rng::from_os_rng();
     *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();

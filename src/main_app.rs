@@ -1,23 +1,14 @@
-use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{future::Future, net::SocketAddr, sync::Arc};
 use anyhow::{bail, Error};
-use futures_util::SinkExt;
-use futures_util::stream::SplitSink;
+use futures_util::{SinkExt, stream::SplitSink};
 use log::{debug, error, info};
 use rusqlite::Connection;
-use rusqlite::fallible_iterator::FallibleIterator;
 use serde::{Deserialize, Serialize};
-use tokio::net::TcpStream;
-use tokio::sync::{Mutex, RwLock};
-use tokio::task;
+use tokio::{net::TcpStream, sync::Mutex, task};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
-use tracing::field::debug;
 use tungstenite::Message;
-use crate::client_connection::update_nonce;
-use crate::connection_info::ConnectionInfo;
-use crate::screen_state::ScreenState;
+use crate::{client_connection::update_nonce, connection_info::ConnectionInfo, screen_state::ScreenState};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub(crate) struct ItemInfo {
@@ -29,11 +20,11 @@ pub(crate) struct ItemInfo {
     pub(crate) quantity: f64,
 }
 
-impl ItemInfo {
-    fn new(id: i32, name: String, price: f64, age_limit: i32, divisible: bool, quantity: f64) -> Self {
-        ItemInfo { id, name, price, age_limit, divisible, quantity }
-    }
-}
+// impl ItemInfo {
+//     fn new(id: i32, name: String, price: f64, age_limit: i32, divisible: bool, quantity: f64) -> Self {
+//         ItemInfo { id, name, price, age_limit, divisible, quantity }
+//     }
+// }
 
 #[derive(Deserialize)]
 pub(crate) struct CheckoutList {
@@ -50,12 +41,12 @@ impl CheckoutList {
         Self { list: Vec::new(), total: 0.0 }
     }
 
-    fn update_total(&mut self) {
-        self.total = 0.0;
-        for item in self.list.iter() {
-            self.total += item.quantity * item.price;
-        }
-    }
+    // fn update_total(&mut self) {
+    //     self.total = 0.0;
+    //     for item in self.list.iter() {
+    //         self.total += item.quantity * item.price;
+    //     }
+    // }
 
     pub(crate) fn force_till(&mut self) -> bool {
         for item in &self.list {
@@ -69,7 +60,7 @@ impl CheckoutList {
 
 pub(crate) async fn main_app_handler(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -105,7 +96,7 @@ pub(crate) async fn main_app_handler(
 
 async fn main_app_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,

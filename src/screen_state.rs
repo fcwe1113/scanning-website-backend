@@ -1,5 +1,4 @@
-use std::fmt;
-use std::fmt::Formatter;
+use std::{fmt, fmt::Formatter};
 
 #[derive(Clone, Debug)]
 pub(crate) enum ScreenState {
@@ -9,8 +8,8 @@ pub(crate) enum ScreenState {
     StoreLocator,
     Scanner,
     Payment,
-    Transfer,
-    End
+    // Transfer,
+    // End
 }
 
 impl fmt::Display for ScreenState {
@@ -22,8 +21,8 @@ impl fmt::Display for ScreenState {
             Self::StoreLocator => write!(f, "Store Locator"),
             Self::Scanner => write!(f, "Scanner"),
             Self::Payment => write!(f, "Payment"),
-            Self::Transfer => write!(f, "Transfer"),
-            Self::End => write!(f, "End")
+            // Self::Transfer => write!(f, "Transfer"),
+            // Self::End => write!(f, "End")
         }
     }
 }
@@ -37,8 +36,8 @@ impl ScreenState {
             Self::StoreLocator => 3,
             Self::Scanner => 4,
             Self::Payment => 5,
-            Self::Transfer => 6,
-            Self::End => 7
+            // Self::Transfer => 6,
+            // Self::End => 7
         }
     }
 }

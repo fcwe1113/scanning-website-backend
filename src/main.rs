@@ -2,65 +2,37 @@ mod connection_info;
 mod token_exchange;
 mod screen_state;
 mod client_connection;
-mod tls_cert_gen;
 mod login_screen;
 mod sign_up;
 mod store_locator;
 mod main_app;
 mod payment;
 
-use crate::client_connection::client_connection;
-use crate::connection_info::ConnectionInfo;
-use crate::screen_state::ScreenState;
-use crate::tls_cert_gen::{generate_acme_cert, generate_self_signed_cert};
-use crate::token_exchange::*;
-use acme2::{AccountBuilder, DirectoryBuilder, OrderBuilder};
-use anyhow::{bail, Context, Error};
-use axum::{
-    http::{Response, StatusCode},
-    response::IntoResponse,
-    routing::{any, get, post},
-    debug_handler,
-    Router,
-    ServiceExt,
-    handler::Handler
+use crate::{
+    client_connection::client_connection,
+    connection_info::ConnectionInfo,
+    token_exchange::*,
+    main_app::CheckoutList,
+    sign_up::SignUpForm,
+    store_locator::ShopInfo
 };
-use axum_server::{Server, tls_rustls::RustlsConfig};
-use futures::{SinkExt, StreamExt};
+use anyhow::{bail, Error};
 use log::{debug, error, info};
-use rand::{
-    distr::Alphanumeric,
-    rng,
-    Rng,
-    RngCore,
-    SeedableRng};
-use rand_chacha::ChaCha20Rng;
-use rustls::{
-    pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer},
-    crypto::CryptoProvider
+use rustls::{pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer}};
+use std::{
+    net::SocketAddr,
+    string::String,
+    sync::Arc,
+    time::Duration,
+    fs,
+    thread,
 };
-use std::{env, iter, net::SocketAddr, string::String, sync::Arc, time::Duration, collections::HashMap, fs, thread, time};
-use std::future::Future;
-use std::ptr::read;
-use std::str::FromStr;
-use chrono::{TimeDelta, Utc, NaiveDateTime, Local};
-use futures_util::task::SpawnExt;
-use timer::Timer;
-use tokio::{net::{TcpListener, TcpStream}, sync::{Mutex, RwLock}, task};
-use tokio_tungstenite::{accept_async, tungstenite::protocol::Message};
-use tokio_rustls::{rustls, TlsAcceptor, TlsStream};
-use tokio_rustls_acme::acme::ChallengeType;
+use chrono::Local;
+use tokio::{net::TcpListener, sync::{Mutex, RwLock}, task};
+use tokio_rustls::{rustls, TlsAcceptor};
 use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
-use tungstenite::Utf8Bytes;
-use unicode_segmentation::UnicodeSegmentation;
-use warp::Filter;
 use rusqlite::{Connection, Result};
-use rusqlite::fallible_iterator::FallibleIterator;
-use serde_json::Value;
-use warp::hyper::body::HttpBody;
-use crate::main_app::CheckoutList;
-use crate::sign_up::SignUpForm;
-use crate::store_locator::ShopInfo;
+
 // boilerplate is based on the example from https://github.com/campbellgoe/rust_websocket_server/blob/main/src/main.rs
 
 // compress the folder to deploy to the server (change the ip if needed)
@@ -79,10 +51,10 @@ const DB_BACKUP_LOCATION: &str = "scanning_system_backup.db";
 const CERT_PATH: &str = "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/fullchain.pem";
 const PRIVATE_KEY_PATH: &str = "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/privkey.pem";
 
-struct test {
-    id: String,
-    name: String
-}
+// struct Test {
+//     id: String,
+//     name: String
+// }
 
 #[tokio::main]
 async fn main() {
@@ -107,18 +79,18 @@ async fn main() {
     let temp_sign_up_username_list_lock = Arc::new(Mutex::new(temp_sign_up_username_list)); // and mutex it
 
     // change the paths accordingly for server/local versions
-    // let cert = CertificateDer::from_pem_file(CERT_PATH).unwrap();
-    // let private_key = PrivateKeyDer::from_pem_file(PRIVATE_KEY_PATH).unwrap();
-    // debug!("TLS certificate loaded");
+    let cert = CertificateDer::from_pem_file(CERT_PATH).unwrap();
+    let private_key = PrivateKeyDer::from_pem_file(PRIVATE_KEY_PATH).unwrap();
+    debug!("TLS certificate loaded");
 
     // set up TLS acceptor
     // currently the cert is dealt with on the server side via certbot and letsencrypt
     // certbot: https://certbot.eff.org/
     // letsencrypt: https://letsencrypt.org/
-    // rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
-    // let config = rustls::ServerConfig::builder()
-    //     .with_no_client_auth()
-    //     .with_single_cert(vec![CertificateDer::from(cert)], PrivateKeyDer::try_from(private_key).unwrap()).unwrap();
+    rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
+    let config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![CertificateDer::from(cert)], PrivateKeyDer::try_from(private_key).unwrap()).unwrap();
 
     // db testing
     // IMPORTANT!!!!!!!!!!!!!!!!!!!
@@ -126,7 +98,7 @@ async fn main() {
     // OR ONE BAD COMMAND MEANS DEATH TO THE DBBBBBBBBBBBBBBBBB
 
     // this line will try and connect to a db and will cause a panic if it fails to connect to one
-    let mut db = Connection::open(DB_LOCATION).unwrap();
+    let db = Connection::open(DB_LOCATION).unwrap();
     thread::spawn(|| { // thread to backup the db every 3 hrs
         loop{
             let _ = fs::copy(DB_LOCATION, DB_BACKUP_LOCATION); // yes it panics and crashes if it cant copy, no its not a bug its a feature
@@ -137,7 +109,7 @@ async fn main() {
 
     let shop_list: Arc<RwLock<Vec<ShopInfo>>> = Default::default();
     async fn shop_list_update(shop_list: Arc<RwLock<Vec<ShopInfo>>>) -> Result<(), Error> {
-        let mut db = Connection::open(DB_LOCATION)?;
+        let db = Connection::open(DB_LOCATION)?;
         loop{
             let temp_list = task::block_in_place(|| {
                 let mut stmt = db.prepare("SELECT name, address FROM Shops").unwrap();
@@ -162,35 +134,35 @@ async fn main() {
     // thread to update the shop list every day
     tokio::spawn(shop_list_update(shop_list.clone()));
 
-    // let mut stmt = db.prepare("SELECT id, name FROM test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
+    // let mut stmt = db.prepare("SELECT id, name FROM Test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
     // to receive select queries from the db the backend will need to prepare spots (aka vars) to store the incoming data
     // .query_map() is the executor of the command
     // below we used a self defined struct to store incoming data but theoretically cant u just add the strings together and decipher them the other end?
-    let mut stmt = db.prepare("SELECT id, name FROM test").unwrap();
-    let query_iter = stmt.query_map([], |row| {
-        Ok(test {
-            id: row.get(0).unwrap(),
-            name: row.get(1).unwrap(),
-        })
-    }).unwrap();
+    // let mut stmt = db.prepare("SELECT id, name FROM Test").unwrap();
+    // let query_iter = stmt.query_map([], |row| {
+    //     Ok(Test {
+    //         id: row.get(0).unwrap(),
+    //         name: row.get(1).unwrap(),
+    //     })
+    // }).unwrap().collect::<Result<Vec<Test>>>().unwrap();
+    //
+    // for e in query_iter {
+    //     let e = e;
+    //     println!("{}|{}", e.id, e.name);
+    // }
 
-    for e in query_iter {
-        let e = e.unwrap();
-        println!("{}|{}", e.id, e.name);
-    }
-
-    stmt = db.prepare("SELECT name FROM test WHERE id = '01';").unwrap();
+    let mut stmt = db.prepare("SELECT name FROM Test WHERE id = '01';").unwrap();
     let ans = stmt.query_map([], |row| {Ok(row.get(0).unwrap())}).unwrap().collect::<Result<Vec<String>>>().unwrap();
     let ans = &ans[0];
     // ? are holes you fill into the statement (prepared statements)
-    db.execute("UPDATE test SET name = ?1 WHERE id = '01';", [ans]).unwrap();
+    db.execute("UPDATE Test SET name = ?1 WHERE id = '01';", [ans]).unwrap();
 
     // Create the TCP listener
     let listener = TcpListener::bind(&LISTENER_ADDR).await.expect("Failed to bind");
 
     info!("Listening on: {}", LISTENER_ADDR);
 
-    // let tls_acceptor = TlsAcceptor::from(Arc::new(config));
+    let tls_acceptor = TlsAcceptor::from(Arc::new(config));
 
     // waits for an incoming connection and runs the loop if there is one coming in
     loop {
@@ -200,10 +172,10 @@ async fn main() {
                     SocketAddr::V4(v4addr) => {debug!("V4"); SocketAddr::from(v4addr)}
                     SocketAddr::V6(v6addr) => {debug!("V6"); SocketAddr::from(v6addr)}
                 };
-                // let stream = match tls_acceptor.accept(stream).await {
-                //     Ok(stream) => {stream}
-                //     Err(e) => {error!("Error on tls handshake for client {}: {}", incoming_addr, e); break;}
-                // };
+                let stream = match tls_acceptor.accept(stream).await {
+                    Ok(stream) => {stream}
+                    Err(e) => {error!("Error on tls handshake for client {}: {}", incoming_addr, e); break;}
+                };
 
                 let mut is_duplicate = false;
 
@@ -222,7 +194,7 @@ async fn main() {
                     // the list and prevent anything else from interfering and escapes the duplicate check
                     // effectively this ensures one connection gets established before the next new client can start the
                     // connection process
-                    let mut temp_connections_list = &mut connections_list_lock.lock().await;
+                    let temp_connections_list = &mut connections_list_lock.lock().await;
                     for connections in temp_connections_list.iter() {
                         if connections.client_addr == incoming_addr {
                             is_duplicate = true;

@@ -1,44 +1,40 @@
-use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{future::Future, net::SocketAddr};
 use anyhow::{bail, Error};
-use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime};
 use creditcard::CreditCard;
-use futures_util::SinkExt;
-use futures_util::stream::SplitSink;
+use futures_util::{SinkExt, stream::SplitSink};
 use log::{debug, error, info};
 use rusqlite::Connection;
-use serde::Deserialize;
-use tokio::net::TcpStream;
-use tokio::sync::Mutex;
-use tokio::task;
+use serde::{Deserialize, Serialize};
+use tokio::{net::TcpStream, task};
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::Message;
 use regex::Regex;
-use rusqlite::fallible_iterator::FallibleIterator;
 use rusqlite::types::Value;
-use warp::hyper::body::HttpBody;
-use crate::client_connection::update_nonce;
-use crate::connection_info::ConnectionInfo;
-use crate::main_app::{CheckoutList, ItemInfo};
-use crate::screen_state::ScreenState;
+use tokio_rustls::server::TlsStream;
+use crate::{client_connection::update_nonce, main_app::CheckoutList};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Clone)]
 struct CardInfo {
     number: String,
     expiry: String,
     cvv: String,
 }
 
+impl CardInfo {
+    pub(crate) fn value_is_empty(&self) -> bool {
+        self.number == String::new() && self.expiry == String::new() && self.cvv == String::new()
+    }
+}
+
 pub(crate) async fn payment_handler(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
     username: &String,
     status_check_timer: &mut i32,
-    list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
     shop_id: &mut i32,
     checkout_list: &mut CheckoutList,
     db: &mut Connection,
@@ -59,7 +55,7 @@ pub(crate) async fn payment_handler(
     // j. backend just takes that in and replies "5OK", if sent an invalid till token reply "5INVALID"
 
     let result = payment_screen(msg, sender, addr, token, nonce, status_check_timer, shop_id, username, checkout_list, db);
-    if let Err(err) = resolve_result(result, addr, list_lock.clone()).await {
+    if let Err(err) = resolve_result(result).await {
         bail!(err);
     }
 
@@ -69,7 +65,7 @@ pub(crate) async fn payment_handler(
 
 async fn payment_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -119,6 +115,28 @@ async fn payment_screen(
             sender.send(Message::from("5OK")).await?;
         }
         Ok("STATUS ok".to_string())
+    } else if msg == "CARDREC" {
+        let mut card_info = db.prepare("SELECT card_num, strftime('%m/%Y', exp), cvv FROM Users WHERE username = ?1")?;
+        let card_info = task::block_in_place(move || {card_info.query_map([username], |row| {
+            Ok(CardInfo{
+                number: match row.get(0) {
+                    Ok(num) => num,
+                    _ => String::new()
+                },
+                expiry: match row.get(1) {
+                    Ok(date) => date,
+                    _ => String::new()
+                },
+                cvv: match row.get(2) {
+                    Ok(cvv) => cvv,
+                    _ => String::new()
+                }
+            })
+        }).unwrap().collect::<Result<Vec<CardInfo>, _>>().unwrap()})[0].clone();
+        if !card_info.value_is_empty() {
+            sender.send(Message::from(format!("5CARD{}", serde_json::to_string(&card_info).unwrap()))).await?;
+        }
+        Ok("STATUS ok".to_string())
     } else if msg.chars().take(4).collect::<String>() == "CARD" {
 
         if checkout_list.force_till() {
@@ -141,14 +159,30 @@ async fn payment_screen(
         }
         
         if Regex::new("^\\d{2}/\\d{4}$")?.is_match(card.expiry.as_str()) { 
-            if card.expiry.chars().take(2).collect::<String>().parse::<i32>()? < 12 { 
-                if NaiveDateTime::new(
+            if card.expiry.chars().take(2).collect::<String>().parse::<i32>()? < 12 {
+                let date = NaiveDateTime::new(
                     NaiveDate::from_ymd_opt(card.expiry.chars().skip(3).collect::<String>().parse::<i32>()?,
                                             card.expiry.chars().take(2).collect::<String>().parse::<u32>()?, 1).unwrap(),
-                    NaiveTime::from_hms_opt(0, 0, 0).unwrap()).and_utc().timestamp() - Utc::now().timestamp() >= 0 {
+                    NaiveTime::from_hms_opt(0, 0, 0).unwrap());
+                if date.and_utc().timestamp() - Local::now().timestamp() >= 0 {
                         if Regex::new("^\\d{3}$")?.is_match(card.cvv.as_str()) {
                             checkout(checkout_list, username, shop_id, db).await;
                             info!("client {} paid by card", addr);
+                            let changed = match db.execute("UPDATE Users SET card_num = ?1, exp = ?2, cvv = ?3 WHERE username = ?4 and strftime('%S', dob) = '00' and strftime('%M', dob) = '00' and strftime('%H', dob) = '00';", [
+                                card.number,
+                                date.to_string(),
+                                card.cvv,
+                                username.to_string(),
+                            ])? {
+                                0 => false,
+                                _ => true
+                            };
+                            if changed {
+                                info!("saved card info for client {}", addr);
+                            } else {
+                                info!("client {} using guest account, card not saved", addr);
+                            }
+                            sender.send(Message::from("5SUCCESS")).await?;
                             return Ok("STATUS ok".to_string())
                         }
                 }
@@ -161,7 +195,7 @@ async fn payment_screen(
     }
 }
 
-async fn resolve_result(result: impl Future<Output=Result<String, Error>>+Sized, addr: &SocketAddr, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) -> Result<(), Error> {
+async fn resolve_result(result: impl Future<Output=Result<String, Error>>+Sized) -> Result<(), Error> {
     match result.await {
         Ok(r) => {
             // debug!("result: {}", r.as_str());
@@ -188,7 +222,7 @@ async fn checkout(list: &CheckoutList, username: &String, shop_id: &i32, db: &mu
     let tx = db.transaction().unwrap();
     let time = &NaiveDateTime::from(Local::now().naive_local()).to_string();
     // db.execute("BEGIN TRANSACTION"[]).unwrap();
-    tx.execute("INSERT INTO Transactions (username, shop_id, time) VALUES ($1, $2, $3);", [
+    tx.execute("INSERT INTO Transactions (username, shop_id, time) VALUES (?1, ?2, ?3);", [
         Value::from(username.clone()),
         Value::from(shop_id),
         Value::from(time.clone()),
@@ -202,14 +236,14 @@ async fn checkout(list: &CheckoutList, username: &String, shop_id: &i32, db: &mu
     for item in &list.list {
 
         // update purchase records
-        tx.execute("INSERT INTO Purchase_records (transaction_id, item_id, quantity) VALUES ($1, $2, $3);", [
+        tx.execute("INSERT INTO Purchase_records (transaction_id, item_id, quantity) VALUES (?1, ?2, ?3);", [
             Value::from(id),
             Value::from(item.id),
             Value::from(item.quantity)
         ]).unwrap();
 
         // update shop stocks, would have no effect on null values or nonexistent records
-        tx.execute("UPDATE Shop_stock set stock = stock - $1 where shop_id = $2 and item_id = $3;", [
+        tx.execute("UPDATE Shop_stock set stock = stock - ?1 where shop_id = ?2 and item_id = ?3;", [
             Value::from(item.quantity),
             Value::from(shop_id),
             Value::from(item.id)

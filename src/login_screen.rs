@@ -1,30 +1,26 @@
 use std::{
     future::Future,
     net::SocketAddr,
-    sync::Arc
+    sync::Arc,
+    ops::Add
 };
-use std::ops::Add;
 use anyhow::{bail, Error};
 use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::{rand_core::OsRng, SaltString}};
 use chrono::{Duration, Local, NaiveDateTime, NaiveTime};
 use futures_util::{SinkExt, stream::SplitSink};
 use log::{debug, error, info};
-use rand::{Rng};
+use rand::Rng;
 use rand_chacha::{ChaCha20Rng, rand_core::SeedableRng};
-use timer::Timer;
 use tokio::{net::TcpStream, sync::Mutex, task};
 use tokio_tungstenite::WebSocketStream;
-use tungstenite::{Message, Utf8Bytes};
-use rusqlite::{Connection, fallible_iterator::FallibleIterator};
+use tungstenite::Message;
+use rusqlite::Connection;
 use tokio_rustls::server::TlsStream;
-use crate::client_connection::update_nonce;
-use crate::connection_info::ConnectionInfo;
-use crate::screen_state::ScreenState;
-use crate::test;
+use crate::{client_connection::update_nonce, connection_info::ConnectionInfo, screen_state::ScreenState};
 
 pub(crate) async fn start_screen_handler( // handler function for the start screen
                                           msg: &mut String,
-                                          sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+                                          sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
                                           addr: &SocketAddr,
                                           token: &String,
                                           nonce: &mut String,
@@ -65,7 +61,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
 
 async fn start_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -88,11 +84,11 @@ async fn start_screen(
         let msg = msg.chars().skip(5).collect::<String>();
         let space_index = msg.find(" ").unwrap();
         let login_username = msg.chars().take(space_index).collect::<String>();
-        let mut password = msg.chars().skip(space_index + 1).collect::<String>();
+        let password = msg.chars().skip(space_index + 1).collect::<String>();
         // println!("username: {}, password: {}", login_username, password);
 
         // use task::block in place for sql code to prevent errors
-        let mut result = task::block_in_place(|| { // 1cA1. querying db for password
+        let result = task::block_in_place(|| { // 1cA1. querying db for password
             struct Password{ // essentially a container to hold the db query result
                 hash: String,
             }
@@ -170,17 +166,11 @@ async fn start_screen(
         let mut rng = ChaCha20Rng::from_os_rng();
         loop {
             guest_username = String::from("Guest") + &*(0..10).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
-            let mut result = task::block_in_place(|| {
-                struct Username {
-                    username: String,
-                }
+            let result = task::block_in_place(|| {
                 let mut stmt = db.prepare("SELECT username FROM Users WHERE username = ?1;").unwrap();
-                let query_iter = stmt.query_map([guest_username.clone()], |row| {
-                    Ok(Username {
-                        username: row.get(0).unwrap(),
-                    })
-                }).unwrap();
-                return query_iter.collect::<Result<Vec<_>, _>>().unwrap();
+                return stmt.query_map([guest_username.clone()], |row| {
+                    Ok(row.get(0)?)
+                }).unwrap().collect::<Result<Vec<String>, _>>().unwrap();
             });
             if result.is_empty() {
                 let mut datetime = Local::now().naive_local();
@@ -265,7 +255,7 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
     }
 }
 
-pub(crate) async fn token_status_check(msg: String, token: &String, addr: &SocketAddr, status_check_timer: &mut i32, nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>) -> Result<String, Error> {
+pub(crate) async fn token_status_check(msg: String, token: &String, addr: &SocketAddr, status_check_timer: &mut i32, nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>) -> Result<String, Error> {
     if msg == *token {
         // resets the timer when the status check is received
         debug!("status checked for {}", addr);

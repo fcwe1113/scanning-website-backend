@@ -1,27 +1,14 @@
-use std::fmt;
-use std::fmt::Formatter;
-use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{future::Future, net::SocketAddr, sync::Arc};
 use anyhow::{bail, Error};
 use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
 use log::{debug, error, info};
-use rand::Rng;
-use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::SeedableRng;
-use rusqlite::Connection;
-use serde_json::Value;
-use tokio::net::TcpStream;
-use tokio::sync::{Mutex, RwLock};
+use tokio::{net::TcpStream, sync::{Mutex, RwLock}};
 use tokio_tungstenite::WebSocketStream;
-use tracing_subscriber::fmt::format;
 use tungstenite::Message;
 use serde::Serialize;
 use tokio_rustls::server::TlsStream;
-use crate::client_connection::update_nonce;
-use crate::connection_info::ConnectionInfo;
-use crate::screen_state::ScreenState;
+use crate::{client_connection::update_nonce, connection_info::ConnectionInfo, screen_state::ScreenState};
 
 #[derive(Clone, Debug, Serialize)]
 pub(crate) struct ShopInfo {
@@ -30,17 +17,17 @@ pub(crate) struct ShopInfo {
 }
 
 impl ShopInfo {
-    fn new_empty() -> ShopInfo {
-        ShopInfo {
-            name: String::new(),
-            address: String::new()
-        }
-    }
+    // fn new_empty() -> ShopInfo {
+    //     ShopInfo {
+    //         name: String::new(),
+    //         address: String::new()
+    //     }
+    // }
 }
 
 pub(crate) async fn store_locator_handler(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -49,7 +36,6 @@ pub(crate) async fn store_locator_handler(
     list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
     shop_list: Arc<RwLock<Vec<ShopInfo>>>,
     shop_id: &mut i32,
-    db: &mut Connection
 ) -> Result<(), Error> {
 
     // 3 = store locator
@@ -76,7 +62,7 @@ pub(crate) async fn store_locator_handler(
 
 async fn store_locator_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -134,7 +120,7 @@ async fn store_locator_screen(
                 }
                 Ok("STATUS ok".to_string())
             }
-            Err(e) => {bail!("client {} sent invalid store id", addr)}
+            Err(e) => {bail!("client {} sent invalid store id: {}", addr, e)}
         }
     } else {
         bail!("store locator screen received invalid message from {}: {}", addr, msg);

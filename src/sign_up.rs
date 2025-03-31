@@ -1,34 +1,17 @@
-use std::future::Future;
-use std::net::SocketAddr;
-use std::sync::Arc;
+use std::{future::Future, net::SocketAddr, sync::Arc};
 use anyhow::{bail, Error};
-use argon2::{Argon2, PasswordHasher};
-use argon2::password_hash::rand_core::OsRng;
-use argon2::password_hash::SaltString;
-use chrono::{Duration, NaiveDateTime};
-use futures_util::SinkExt;
-use futures_util::stream::SplitSink;
+use argon2::{Argon2, PasswordHasher, password_hash::{rand_core::OsRng, SaltString}};
+use chrono::NaiveDateTime;
+use futures_util::{SinkExt, stream::SplitSink};
 use log::{debug, error, info};
-use rand::Rng;
-use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::SeedableRng;
 use rusqlite::Connection;
-use rusqlite::fallible_iterator::FallibleIterator;
 use serde_email::is_valid_email;
 use serde_json::Value;
-use timer::Timer;
 use tokio::{net::TcpStream, sync::Mutex, task};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::Message;
-use crate::client_connection::update_nonce;
-use crate::connection_info::ConnectionInfo;
-use crate::login_screen::token_status_check;
-use crate::screen_state::ScreenState;
-
-struct DbUsername {
-    username: String,
-}
+use crate::{connection_info::ConnectionInfo, login_screen::token_status_check, screen_state::ScreenState};
 
 #[derive(Clone)]
 pub(crate) struct SignUpForm {
@@ -69,7 +52,7 @@ impl SignUpForm {
 
 pub(crate) async fn sign_up_handler( // handler function for the start screen
                                      msg: &mut String,
-                                     sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+                                     sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
                                      addr: &SocketAddr,
                                      token: &String,
                                      nonce: &mut String,
@@ -124,7 +107,7 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
 
 async fn sign_up_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -193,12 +176,9 @@ async fn sign_up_screen(
 
         let result = task::block_in_place(|| { // 2f. check username against db
             let mut stmt = db.prepare("SELECT username FROM Users WHERE username = ?").unwrap();
-            let query_iter = stmt.query_map([&form.username], |row| {
-                Ok(DbUsername {
-                    username: row.get(0)?,
-                })
-            }).unwrap();
-            return query_iter.collect::<Result<Vec<_>, _>>().unwrap()
+            return stmt.query_map([&form.username], |row| {
+                Ok(row.get(0)?)
+            }).unwrap().collect::<Result<Vec<String>, _>>().unwrap()
         });
         if result.is_empty() { // if result vec is empty that means the username is not taken
             let mut used = false;
