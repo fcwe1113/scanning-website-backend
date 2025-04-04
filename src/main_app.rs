@@ -33,13 +33,9 @@ pub(crate) struct CheckoutList {
 }
 
 impl CheckoutList {
-    fn new(list: Vec<ItemInfo>, total: f64) -> Self {
-        Self { list, total }
-    }
+    fn new(list: Vec<ItemInfo>, total: f64) -> Self { Self { list, total } }
 
-    pub(crate) fn new_empty() -> Self {
-        Self { list: Vec::new(), total: 0.0 }
-    }
+    pub(crate) fn new_empty() -> Self { Self { list: Vec::new(), total: 0.0 } }
 
     // fn update_total(&mut self) {
     //     self.total = 0.0;
@@ -50,7 +46,7 @@ impl CheckoutList {
 
     pub(crate) fn force_till(&mut self) -> bool {
         for item in &self.list {
-            if item.age_limit != 0 {
+            if item.age_limit != 0 && item.quantity != 0.0 {
                 return true
             }
         }
