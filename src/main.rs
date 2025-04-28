@@ -135,26 +135,26 @@ async fn main() {
     // thread to update the shop list every day
     tokio::spawn(shop_list_update(shop_list.clone()));
 
+    // // rusqlite demo
+    // struct Test {
+    //     id: String,
+    //     name: String,
+    // }
+    // 
     // let mut stmt = db.prepare("SELECT id, name FROM Test").unwrap(); // dont select * as the backend will need to anticipate rows to colect into lists
-    // to receive select queries from the db the backend will need to prepare spots (aka vars) to store the incoming data
-    // .query_map() is the executor of the command
-    // below we used a self defined struct to store incoming data but theoretically cant u just add the strings together and decipher them the other end?
-    // let mut stmt = db.prepare("SELECT id, name FROM Test").unwrap();
-    // let query_iter = stmt.query_map([], |row| {
+    // // to receive select queries from the db the backend will need to prepare spots (aka vars) to store the incoming data
+    // // .query_map() is the executor of the command
+    // // below we used a self defined struct to store incoming data but theoretically cant u just add the strings together and decipher them the other end?
+    // let query_iter = &stmt.query_map([], |row| {
     //     Ok(Test {
     //         id: row.get(0).unwrap(),
     //         name: row.get(1).unwrap(),
     //     })
-    // }).unwrap().collect::<Result<Vec<Test>>>().unwrap();
-    //
-    // for e in query_iter {
-    //     let e = e;
-    //     println!("{}|{}", e.id, e.name);
-    // }
+    // }).unwrap().collect::<Result<Vec<Test>>>().unwrap()[0];
+    // println!("{}|{}", query_iter.id, query_iter.name);
 
     let mut stmt = db.prepare("SELECT name FROM Test WHERE id = '01';").unwrap();
-    let ans = stmt.query_map([], |row| {Ok(row.get(0).unwrap())}).unwrap().collect::<Result<Vec<String>>>().unwrap();
-    let ans = &ans[0];
+    let ans = &stmt.query_map([], |row| {Ok(row.get(0).unwrap())}).unwrap().collect::<Result<Vec<String>>>().unwrap()[0];
     // ? are holes you fill into the statement (prepared statements)
     db.execute("UPDATE Test SET name = ?1 WHERE id = '01';", [ans]).unwrap();
 
