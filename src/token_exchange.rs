@@ -8,7 +8,7 @@ use tokio::{net::TcpStream, sync::Mutex};
 use tokio_rustls::server::TlsStream;
 use tokio_tungstenite::WebSocketStream;
 use tungstenite::{Message, Utf8Bytes};
-use crate::{connection_info::ConnectionInfo, screen_state::ScreenState};
+use crate::{connection_info::ConnectionInfo, screen_state::ScreenState, APP_NONCE_LENGTH};
 
 // messages sent from both ends should follow a similar format (at least for the first few chars)
 // *** denotes client side tasks
@@ -70,7 +70,7 @@ async fn token_exchange(
     } else if msg == *token { // 0f check token
         let mut rng = ChaCha20Rng::from_os_rng();
 
-        *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
+        *nonce = (0..APP_NONCE_LENGTH).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
         sender.send(Message::from(format!("0{}", nonce))).await?; //0f ack
         info!("nonce sent to {}: {}", addr, nonce);
         Ok(String::from("token ackked"))

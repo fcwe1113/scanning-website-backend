@@ -50,6 +50,7 @@ const DB_LOCATION: &str = "scanning_system.db";
 const DB_BACKUP_LOCATION: &str = "scanning_system_backup.db";
 const CERT_PATH: &str = "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/fullchain.pem";
 const PRIVATE_KEY_PATH: &str = "/etc/letsencrypt/live/efrgtghyujhygrewds.ip-ddns.com/privkey.pem";
+const APP_NONCE_LENGTH: usize = 20;
 
 // struct Test {
 //     id: String,

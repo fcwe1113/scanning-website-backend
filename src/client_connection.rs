@@ -17,6 +17,7 @@ use crate::{
     payment::payment_handler,
     sign_up::{sign_up_handler, SignUpForm},
     STATUS_CHECK_INTERVAL,
+    APP_NONCE_LENGTH,
     store_locator::{store_locator_handler, ShopInfo},
     token_exchange::token_exchange_handler
 };
@@ -78,20 +79,14 @@ pub(crate) async fn client_connection(
                 match msg.unwrap() {
                     Ok(Message::Text(text)) => {
                         debug!("raw Message received from {}: {}", addr, text);
-                        let mut text = String::from(text.as_str());
-
-                        if nonce.as_str() != "-1" {
-                            if text.len() < 20 {
-                                error!("client {} has invalid nonce: {}", addr, text);
-                                break;
+                        // let text = String::from(text.as_str());
+                        let text = match nonce_check(&nonce, &String::from(text.as_str()), &addr) {
+                            Ok(s) => {s}
+                            Err(e) => {
+                                error!("{}", e);
+                                return;
                             }
-                            if text[..20] != nonce {
-                                error!("client {} has invalid nonce: {}", addr, text);
-                                break;
-                            } else {
-                                text = text.replace(nonce.clone().as_str(), "");
-                            }
-                        }
+                        };
 
                         // first digit denotes client screen status
                         // after reading the first digit get rid of it and pass the rest of the message into the relevant function
@@ -116,28 +111,13 @@ pub(crate) async fn client_connection(
                         // 6 = transferring to till (either by choice or to check id)
                         // 7 = after payment/logging out
 
-                        // get first char
-                        let first_char = match text.chars().next() {
-                            Some(c) => c,
-                            None => {
-                                error!("client {} has empty screen state, exiting", addr);
+                        let (first_char, msg) = match screen_check(&text, list_lock.clone(), &addr).await {
+                            Ok((c, m)) => {(c, m)}
+                            Err(e) => {
+                                error!("{}", e);
                                 return;
-                            },
-                        };
-
-                        // check if first char denotes the page client should be on
-                        for connection_info in list_lock.lock().await.iter() {
-                            if connection_info.client_addr == addr {
-                                if char::to_digit(first_char, 10).unwrap() as i32 != connection_info.screen.as_i32() {
-                                    error!("client {} has incorrect screen state, exiting", addr);
-                                    return;
-                                }
                             }
-                        }
-
-                        // get the rest of the string
-                        let msg = text.chars().next().map(|c| &text[c.len_utf8()..]).unwrap().to_string();
-                        // no need to lock anything used here as no message that can interfere with each other should interfere with each other
+                        };
 
                         // println!("{}, {}", first_char, msg);
                         match first_char {
@@ -293,10 +273,43 @@ pub(crate) async fn client_connection(
     }
 }
 
+fn nonce_check(nonce: &String, msg: &String, addr: &SocketAddr) -> Result<String, Error> {
+    if nonce == "-1" { 
+        return Ok(msg.to_string());
+    } else if msg.len() < APP_NONCE_LENGTH {
+        bail!("client {} has incorrect screen state, exiting", addr)
+    } else if msg.chars().take(APP_NONCE_LENGTH).collect::<String>() != *nonce {
+        bail!("client {} has incorrect screen state, exiting", addr)
+    }
+    
+    Ok(msg.to_string())
+}
+
+async fn screen_check(text: &String, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>, addr: &SocketAddr) -> Result<(char, String), Error> {
+    // get first char
+    let first_char = match text.chars().next() {
+        Some(c) => c,
+        None => {
+            bail!("client {} has empty screen state, exiting", addr);
+        },
+    };
+
+    // check if first char denotes the page client should be on
+    for connection_info in list_lock.lock().await.iter() {
+        if connection_info.client_addr == *addr {
+            if char::to_digit(first_char, 10).unwrap() as i32 != connection_info.screen.as_i32() {
+                bail!("client {} has incorrect screen state, exiting", addr);
+            }
+        }
+    }
+    
+    Ok((first_char, text.chars().skip(1).collect()))
+}
+
 pub(crate) async fn update_nonce(nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>, addr: &SocketAddr) -> Result<String, Error> {
     // generate a new nonce and send it over
     let mut rng = ChaCha20Rng::from_os_rng();
-    *nonce = (0..20).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
+    *nonce = (0..APP_NONCE_LENGTH).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
     if let Err(e) = sender.send(Message::from(format!("STATUS{}", nonce))).await {
         bail!("failed to send nonce to {}: {}", addr, e);
     } else {
