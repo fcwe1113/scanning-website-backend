@@ -81,6 +81,10 @@ pub(crate) async fn client_connection(
                         let mut text = String::from(text.as_str());
 
                         if nonce.as_str() != "-1" {
+                            if text.len() < 20 {
+                                error!("client {} has invalid nonce: {}", addr, text);
+                                break;
+                            }
                             if text[..20] != nonce {
                                 error!("client {} has invalid nonce: {}", addr, text);
                                 break;
@@ -291,7 +295,6 @@ pub(crate) async fn update_nonce(nonce: &mut String, sender: &mut SplitSink<WebS
         bail!("failed to send nonce to {}: {}", addr, e);
     } else {
         info!("updated nonce sent to {}: {}", addr, nonce);
-        // let _ = Ok::<String, String>("nonce updated".to_string());
         Ok("STATUS ok".to_string())
     }
 }
