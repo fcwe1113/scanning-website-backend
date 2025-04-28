@@ -117,7 +117,13 @@ pub(crate) async fn client_connection(
                         // 7 = after payment/logging out
 
                         // get first char
-                        let first_char = text.chars().next().unwrap();
+                        let first_char = match text.chars().next() {
+                            Some(c) => c,
+                            None => {
+                                error!("client {} has empty screen state, exiting", addr);
+                                return;
+                            },
+                        };
 
                         // check if first char denotes the page client should be on
                         for connection_info in list_lock.lock().await.iter() {
