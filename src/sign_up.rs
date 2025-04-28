@@ -166,7 +166,7 @@ async fn sign_up_screen(
         // sanitize inputs again bc who knows what can be in there
         let mut errors = String::new();
         sanitize(&mut form, &mut errors); // 2e. sanitising
-        println!("{}", form.dob.to_string());
+        // println!("{}", form.dob.to_string());
 
         if !errors.is_empty() {
             sender.send(Message::from(format!("2BADFORM{}", errors))).await?; // 2eI.
