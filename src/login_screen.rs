@@ -82,7 +82,20 @@ async fn start_screen(
         // the submitted username and password should be after the LOGIN in the same message
         // in the format of "LOGIN[username][whitespace][password]" note usernames cannot have spaces
         let msg = msg.chars().skip(5).collect::<String>();
-        let space_index = msg.find(" ").unwrap();
+        if msg.len() < 3 {
+            bail!("client {} sent invalid login request, exiting", addr);
+        }
+        let space_index = match msg.find(" ") {
+            Some(i) => {
+                if i == 0 {
+                    bail!("client {} sent invalid login request, exiting", addr);
+                }
+                i
+            },
+            None => {
+                bail!("client {} sent invalid login request, exiting", addr);
+            }
+        };
         let login_username = msg.chars().take(space_index).collect::<String>();
         let password = msg.chars().skip(space_index + 1).collect::<String>();
         // println!("username: {}, password: {}", login_username, password);
