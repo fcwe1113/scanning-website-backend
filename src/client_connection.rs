@@ -282,7 +282,7 @@ fn nonce_check(nonce: &String, msg: &String, addr: &SocketAddr) -> Result<String
         bail!("client {} has incorrect screen state, exiting", addr)
     }
     
-    Ok(msg.to_string())
+    Ok(msg.to_string().chars().skip(APP_NONCE_LENGTH).collect())
 }
 
 async fn screen_check(text: &String, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>, addr: &SocketAddr) -> Result<(char, String), Error> {
