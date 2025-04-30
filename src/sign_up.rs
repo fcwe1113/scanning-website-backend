@@ -250,7 +250,7 @@ fn sanitize(form: &mut SignUpForm, errors: &mut String, addr: &SocketAddr) -> Re
     } else if form.username.contains(|arg0: char| char::is_ascii_control(&arg0)) {
         bail!("client {} submitted control characters in sign up form username, exiting", addr);
     } else if form.username.contains(char::is_whitespace) {
-        *errors += "username cannot contain whitespace characters\n";
+        bail!("client {} submitted username with whitespace in sign up form, exiting", addr);
     } else if form.username.contains(|c| String::from("\\{}[]:\"\'").chars().collect::<Vec<char>>().contains(&c)) {
         *errors += "username contains banned characters (\\{}[]:\"\')\n";
     }
@@ -264,16 +264,16 @@ fn sanitize(form: &mut SignUpForm, errors: &mut String, addr: &SocketAddr) -> Re
         *errors += "username contains banned characters (\\{}[]:\"\')\n";
     } else {
         if form.password.chars().count() < 8 {
-            *errors += "password cannot be less than 8 characters\n";
+            bail!("client {} submitted password that is too short in sign up form, exiting", addr);
         }
         if !form.password.contains(|arg0: char| char::is_ascii_lowercase(&arg0)) {
-            *errors += "password does not have lower case characters\n";
+            bail!("client {} submitted password without lowercase in sign up form, exiting", addr);
         }
         if !form.password.contains(|arg0: char| char::is_ascii_uppercase(&arg0)) {
-            *errors += "password does not have upper case characters\n";
+            bail!("client {} submitted password without uppercase in sign up form, exiting", addr);
         }
         if !form.password.contains(char::is_numeric) {
-            *errors += "password does not have numeric characters\n";
+            bail!("client {} submitted password without digits in sign up form, exiting", addr);
         }
     }
 
