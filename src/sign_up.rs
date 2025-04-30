@@ -165,7 +165,9 @@ async fn sign_up_screen(
 
         // sanitize inputs again bc who knows what can be in there
         let mut errors = String::new();
-        sanitize(&mut form, &mut errors); // 2e. sanitising
+        if let Err(e) = sanitize(&mut form, &mut errors, addr) {
+            bail!(e);
+        }; // 2e. sanitising
         // println!("{}", form.dob.to_string());
 
         if !errors.is_empty() {
@@ -241,12 +243,12 @@ async fn sign_up_screen(
     }
 }
 
-fn sanitize(form: &mut SignUpForm, errors: &mut String) {
+fn sanitize(form: &mut SignUpForm, errors: &mut String, addr: &SocketAddr) -> Result<(), Error> {
     // username (no spaces) (maybe block unicode?)
     if form.username.is_empty() || form.username == "\"\"" {
-        *errors += "username is empty\n";
+        bail!("client {} submitted empty username in sign up form, exiting", addr);
     } else if form.username.contains(|arg0: char| char::is_ascii_control(&arg0)) {
-        *errors += "username cannot contain control characters\n";
+        bail!("client {} submitted control characters in sign up form username, exiting", addr);
     } else if form.username.contains(char::is_whitespace) {
         *errors += "username cannot contain whitespace characters\n";
     } else if form.username.contains(|c| String::from("\\{}[]:\"\'").chars().collect::<Vec<char>>().contains(&c)) {
@@ -255,9 +257,9 @@ fn sanitize(form: &mut SignUpForm, errors: &mut String) {
 
     // password (need at least 1 upper and lower case char and a number, and at least 8 long, and limited to (non control)ascii)
     if form.password.is_empty() || form.password == "\"\"" {
-        *errors += "password is empty\n";
+        bail!("client {} submitted empty password in sign up form, exiting", addr);
     } else if !form.password.chars().all(|arg0: char| char::is_ascii(&arg0)) || form.password.contains(|arg0: char| char::is_ascii_control(&arg0)) {
-        *errors += "password can contain only (non control) ASCII characters\n";
+        bail!("client {} submitted control characters in sign up form password, exiting", addr);
     } else if form.password.contains(|c| String::from("\\{}[]:\"\'").chars().collect::<Vec<char>>().contains(&c)) {
         *errors += "username contains banned characters (\\{}[]:\"\')\n";
     } else {
@@ -277,20 +279,20 @@ fn sanitize(form: &mut SignUpForm, errors: &mut String) {
 
     // maybe limit first/last name to ascii?
     if form.first_name.is_empty() || form.first_name == "\"\"" {
-        *errors += "first name is empty\n";
+        bail!("client {} submitted empty first name in sign up form, exiting", addr);
     } else if form.first_name.contains(|arg0: char| char::is_ascii_control(&arg0)) {
-        *errors += "first name cannot contain control characters\n";
+        bail!("client {} submitted control characters in sign up form first name, exiting", addr);
     }
 
     if form.last_name.is_empty() || form.last_name == "\"\"" {
-        *errors += "last name is empty\n";
+        bail!("client {} submitted empty last name in sign up form, exiting", addr);
     } else if form.last_name.contains(|arg0: char| char::is_ascii_control(&arg0)) {
-        *errors += "last name cannot contain control characters\n";
+        bail!("client {} submitted control characters in sign up form last name, exiting", addr);
     }
 
     // dob (following the format: YYYY-MM-DD)
     if form.dob_string.is_empty() || form.dob_string == "\"\"" {
-        *errors += "date of birth is empty\n";
+        bail!("client {} submitted empty dob in sign up form, exiting", addr);
     } else {
         match NaiveDateTime::parse_from_str(&*format!("{} 00:00:00", form.dob_string), "\"%Y-%m-%d\" %H:%M:%S") {
             Ok(dob) => {
@@ -304,12 +306,14 @@ fn sanitize(form: &mut SignUpForm, errors: &mut String) {
 
     // email ([chars]@[chars].[chars], all with non control ascii)
     if form.email.is_empty() || form.email == "\"\"" {
-        *errors += "email is empty\n";
+        bail!("client {} submitted empty email in sign up form, exiting", addr);
     } else if !form.email.chars().all(|arg0: char| char::is_ascii(&arg0)) || form.email.contains(|arg0: char| char::is_ascii_control(&arg0)) {
-        *errors += "email can contain only (non control) ASCII characters\n";
+        bail!("client {} submitted control characters in sign up form email, exiting", addr);
     } else if !is_valid_email(form.email.clone()) {
         *errors += "email is not valid\n";
     }
+    
+    Ok(())
 }
 
 async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Sized, addr: &SocketAddr, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) -> Result<(), Error> {
