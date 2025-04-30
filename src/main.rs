@@ -175,7 +175,7 @@ async fn main() {
                 };
                 let stream = match tls_acceptor.accept(stream).await {
                     Ok(stream) => {stream}
-                    Err(e) => {error!("Error on tls handshake for client {}: {}", incoming_addr, e); break;}
+                    Err(e) => {error!("Error on tls handshake for client {}: {}", incoming_addr, e); continue;}
                 };
 
                 let mut is_duplicate = false;

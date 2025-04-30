@@ -98,27 +98,20 @@ async fn start_screen(
         };
         let login_username = msg.chars().take(space_index).collect::<String>();
         let password = msg.chars().skip(space_index + 1).collect::<String>();
-        // println!("username: {}, password: {}", login_username, password);
 
-        // use task::block in place for sql code to prevent errors
+        // use task::block in place for sql code to prevent blocking other async tasks leading to deadlocks
         let result = task::block_in_place(|| { // 1cA1. querying db for password
-            struct Password{ // essentially a container to hold the db query result
-                hash: String,
-            }
             let mut stmt = db.prepare("SELECT password FROM Users WHERE username = ?1 AND TIME(dob) = \"00:00:00\";").unwrap();
             return stmt.query_map([login_username.clone()], |row| {
-                Ok(Password {
-                    hash: row.get(0).unwrap(),
-                })
+                Ok(row.get::<usize, String>(0).unwrap())
             }).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
         });
 
         // error flag to show if login failed
         let mut error = false;
-        if !result.is_empty() { // if the result is empty that means the given username is not in the db
+        if !result.is_empty() { // if the result vector is empty that means the given username is not in the db
             let password = &*password.into_bytes();
-            let argon2 = Argon2::default();
-            match argon2.verify_password(password, &PasswordHash::new(&*result[0].hash).unwrap()) {
+            match Argon2::default().verify_password(password, &PasswordHash::new(&*result[0])?) {
                 Ok(()) => {
                     // do nothing
                 }

@@ -258,6 +258,8 @@ fn sanitize(form: &mut SignUpForm, errors: &mut String) {
         *errors += "password is empty\n";
     } else if !form.password.chars().all(|arg0: char| char::is_ascii(&arg0)) || form.password.contains(|arg0: char| char::is_ascii_control(&arg0)) {
         *errors += "password can contain only (non control) ASCII characters\n";
+    } else if form.password.contains(|c| String::from("\\{}[]:\"\'").chars().collect::<Vec<char>>().contains(&c)) {
+        *errors += "username contains banned characters (\\{}[]:\"\')\n";
     } else {
         if form.password.chars().count() < 8 {
             *errors += "password cannot be less than 8 characters\n";
