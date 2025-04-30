@@ -260,8 +260,6 @@ fn sanitize(form: &mut SignUpForm, errors: &mut String, addr: &SocketAddr) -> Re
         bail!("client {} submitted empty password in sign up form, exiting", addr);
     } else if !form.password.chars().all(|arg0: char| char::is_ascii(&arg0)) || form.password.contains(|arg0: char| char::is_ascii_control(&arg0)) {
         bail!("client {} submitted control characters in sign up form password, exiting", addr);
-    } else if form.password.contains(|c| String::from("\\{}[]:\"\'").chars().collect::<Vec<char>>().contains(&c)) {
-        *errors += "username contains banned characters (\\{}[]:\"\')\n";
     } else {
         if form.password.chars().count() < 8 {
             bail!("client {} submitted password that is too short in sign up form, exiting", addr);
@@ -282,12 +280,16 @@ fn sanitize(form: &mut SignUpForm, errors: &mut String, addr: &SocketAddr) -> Re
         bail!("client {} submitted empty first name in sign up form, exiting", addr);
     } else if form.first_name.contains(|arg0: char| char::is_ascii_control(&arg0)) {
         bail!("client {} submitted control characters in sign up form first name, exiting", addr);
+    } else if form.first_name.contains(|c| String::from("\\{}[]:\"\'").chars().collect::<Vec<char>>().contains(&c)) {
+        *errors += "first name contains banned characters (\\{}[]:\"\')\n";
     }
 
     if form.last_name.is_empty() || form.last_name == "\"\"" {
         bail!("client {} submitted empty last name in sign up form, exiting", addr);
     } else if form.last_name.contains(|arg0: char| char::is_ascii_control(&arg0)) {
         bail!("client {} submitted control characters in sign up form last name, exiting", addr);
+    } else if form.last_name.contains(|c| String::from("\\{}[]:\"\'").chars().collect::<Vec<char>>().contains(&c)) {
+        *errors += "last name contains banned characters (\\{}[]:\"\')\n";
     }
 
     // dob (following the format: YYYY-MM-DD)
