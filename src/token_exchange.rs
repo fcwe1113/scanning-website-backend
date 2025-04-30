@@ -124,7 +124,7 @@ pub(crate) fn token_gen(list: &Vec<ConnectionInfo>) -> String {
     // will check if the token is used before returning it
 
     let len = 10;
-    let mut output = String::new();
+    let mut output;
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     loop {
         let mut rng = rand::rng();
@@ -132,12 +132,11 @@ pub(crate) fn token_gen(list: &Vec<ConnectionInfo>) -> String {
         output = iter::repeat_with(one_char).take(len).collect();
         let mut taken = false;
         for li in list {
-            if li.token == output{
+            if li.token == output {
                 taken = true
             }
         }
         if !taken { break; }
     }
-
     output
 }

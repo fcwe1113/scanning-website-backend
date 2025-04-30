@@ -168,7 +168,6 @@ async fn sign_up_screen(
         if let Err(e) = sanitize(&mut form, &mut errors, addr) {
             bail!(e);
         }; // 2e. sanitising
-        // println!("{}", form.dob.to_string());
 
         if !errors.is_empty() {
             sender.send(Message::from(format!("2BADFORM{}", errors))).await?; // 2eI.

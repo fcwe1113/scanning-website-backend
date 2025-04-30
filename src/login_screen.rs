@@ -158,50 +158,49 @@ async fn start_screen(
             }
         }
     } else if msg.chars().take(5).collect::<String>() == "GUEST" {
-        let mut guest_username = String::new();
-        let mut rng = ChaCha20Rng::from_os_rng();
-        loop {
-            guest_username = String::from("Guest") + &*(0..10).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
-            let result = task::block_in_place(|| {
-                let mut stmt = db.prepare("SELECT username FROM Users WHERE username = ?1;").unwrap();
-                return stmt.query_map([guest_username.clone()], |row| {
-                    Ok(row.get(0)?)
-                }).unwrap().collect::<Result<Vec<String>, _>>().unwrap();
-            });
-            if result.is_empty() {
-                let mut datetime = Local::now().naive_local();
-                // since we treat user with 00:00:00 in their dob as real users
-                // we need to force difference of somehow someone clicked on proceed as guest at 00:00:00
-                if datetime.time() == NaiveTime::parse_from_str("00:00:00", "%H:%M:%S")? {
-                    datetime = NaiveDateTime::add(datetime, Duration::seconds(1));
-                }
-                let argon2 = Argon2::default();
-                let _ = task::block_in_place(|| { // 2h. insert new user into db
-                    let tx = db.transaction().unwrap();
-                    tx.execute("INSERT INTO Users (username, password, first_name, last_name, dob, email) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", [
-                        guest_username.clone(),
-                        argon2.hash_password("this is an amazing password".as_ref(), &SaltString::generate(&mut OsRng)).unwrap().to_string(),
-                        String::from("Reese"),
-                        String::from("Pineda"),
-                        datetime.to_string(),
-                        String::from("thisIs@nEmail.com")
-                    ]).unwrap();
-                    tx.commit().unwrap();
+        // let mut guest_username;
+        *session_username = {
+            let mut rng = ChaCha20Rng::from_os_rng();
+            let mut guest_username;
+            loop {
+                guest_username = String::from("Guest") + &*(0..10).map(|_| char::from(rng.random_range(32..127))).collect::<String>();
+                let result = task::block_in_place(|| {
+                    let mut stmt = db.prepare("SELECT username FROM Users WHERE username = ?1;").unwrap();
+                    return stmt.query_map([guest_username.clone()], |row| {
+                        Ok(row.get(0)?)
+                    }).unwrap().collect::<Result<Vec<String>, _>>().unwrap();
                 });
-                debug!("new guest created: {}", guest_username);
-                *session_username = guest_username.clone();
-                sender.send(Message::from(format!("1GUEST{}", guest_username))).await?;
-
-                break
+                if result.is_empty() {
+                    break;
+                }
             }
-        }
+            let mut datetime = Local::now().naive_local();
+            // since we treat user with 00:00:00 in their dob as real users
+            // we need to force difference of somehow someone clicked on proceed as guest at 00:00:00
+            if datetime.time() == NaiveTime::parse_from_str("00:00:00", "%H:%M:%S")? {
+                datetime = NaiveDateTime::add(datetime, Duration::seconds(1));
+            }
+            let _ = task::block_in_place(|| { // 2h. insert new user into db
+                let tx = db.transaction().unwrap();
+                tx.execute("INSERT INTO Users (username, password, first_name, last_name, dob, email) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", [
+                    guest_username.clone(),
+                    Argon2::default().hash_password("this is an amazing password".as_ref(), &SaltString::generate(&mut OsRng)).unwrap().to_string(),
+                    String::from("Reese"),
+                    String::from("Pineda"),
+                    datetime.to_string(),
+                    String::from("thisIs@nEmail.com")
+                ]).unwrap();
+                tx.commit().unwrap();
+            });
+            debug!("new guest created: {}", guest_username);
+            sender.send(Message::from(format!("1GUEST{}", guest_username))).await?;
+            guest_username
+        };
 
         Ok(String::from("STATUS ok"))
     } else {
         bail!("login screen received invalid message from {}: {}", addr, msg);
     }
-
-    // Ok("STATUS ok".to_string())
 }
 
 async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Sized, addr: &SocketAddr, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>) -> Result<(), Error> {
