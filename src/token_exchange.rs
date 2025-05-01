@@ -30,7 +30,7 @@ use crate::{connection_info::ConnectionInfo, screen_state::ScreenState, APP_NONC
 
 pub(crate) async fn token_exchange_handler(
     msg: String,
-    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     token_exchanged: &mut bool,
     addr: &SocketAddr,
     token: &String,
@@ -53,7 +53,7 @@ pub(crate) async fn token_exchange_handler(
 async fn token_exchange(
     msg: String,
     token: &String,
-    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     addr: &SocketAddr,
     flag: &bool,
     nonce: &mut String

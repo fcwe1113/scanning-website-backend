@@ -28,7 +28,7 @@ use crate::{
 // which im not
 // for now every change to the list requires a mutex lock
 pub(crate) async fn client_connection(
-    stream: TlsStream<TcpStream>,
+    stream: TcpStream,
     addr: SocketAddr,
     token: String,
     mut token_exchanged: bool,
@@ -306,7 +306,7 @@ async fn screen_check(text: &String, list_lock: Arc<Mutex<Vec<ConnectionInfo>>>,
     Ok((first_char, text.chars().skip(1).collect()))
 }
 
-pub(crate) async fn update_nonce(nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>, addr: &SocketAddr) -> Result<String, Error> {
+pub(crate) async fn update_nonce(nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>, addr: &SocketAddr) -> Result<String, Error> {
     // generate a new nonce and send it over
     let mut rng = ChaCha20Rng::from_os_rng();
     *nonce = (0..APP_NONCE_LENGTH).map(|_| char::from(rng.random_range(32..127))).collect::<String>();

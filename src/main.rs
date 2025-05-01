@@ -80,18 +80,18 @@ async fn main() {
     let temp_sign_up_username_list_lock = Arc::new(Mutex::new(temp_sign_up_username_list)); // and mutex it
 
     // change the paths accordingly for server/local versions
-    let cert = CertificateDer::from_pem_file(CERT_PATH).unwrap();
-    let private_key = PrivateKeyDer::from_pem_file(PRIVATE_KEY_PATH).unwrap();
-    debug!("TLS certificate loaded");
+    // let cert = CertificateDer::from_pem_file(CERT_PATH).unwrap();
+    // let private_key = PrivateKeyDer::from_pem_file(PRIVATE_KEY_PATH).unwrap();
+    // debug!("TLS certificate loaded");
 
     // set up TLS acceptor
     // currently the cert is dealt with on the server side via certbot and letsencrypt
     // certbot: https://certbot.eff.org/
     // letsencrypt: https://letsencrypt.org/
-    rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
-    let config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(vec![CertificateDer::from(cert)], PrivateKeyDer::try_from(private_key).unwrap()).unwrap();
+    // rustls::crypto::ring::default_provider().install_default().expect("Failed to install rustls crypto provider");
+    // let config = rustls::ServerConfig::builder()
+    //     .with_no_client_auth()
+    //     .with_single_cert(vec![CertificateDer::from(cert)], PrivateKeyDer::try_from(private_key).unwrap()).unwrap();
 
     // db testing
     // IMPORTANT!!!!!!!!!!!!!!!!!!!
@@ -163,7 +163,7 @@ async fn main() {
 
     info!("Listening on: {}", LISTENER_ADDR);
 
-    let tls_acceptor = TlsAcceptor::from(Arc::new(config));
+    // let tls_acceptor = TlsAcceptor::from(Arc::new(config));
 
     // waits for an incoming connection and runs the loop if there is one coming in
     loop {
@@ -173,10 +173,10 @@ async fn main() {
                     SocketAddr::V4(v4addr) => {debug!("V4"); SocketAddr::from(v4addr)}
                     SocketAddr::V6(v6addr) => {debug!("V6"); SocketAddr::from(v6addr)}
                 };
-                let stream = match tls_acceptor.accept(stream).await {
-                    Ok(stream) => {stream}
-                    Err(e) => {error!("Error on tls handshake for client {}: {}", incoming_addr, e); continue;}
-                };
+                // let stream = match tls_acceptor.accept(stream).await {
+                //     Ok(stream) => {stream}
+                //     Err(e) => {error!("Error on tls handshake for client {}: {}", incoming_addr, e); continue;}
+                // };
 
                 let mut is_duplicate = false;
 

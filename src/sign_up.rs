@@ -52,7 +52,7 @@ impl SignUpForm {
 
 pub(crate) async fn sign_up_handler( // handler function for the start screen
                                      msg: &mut String,
-                                     sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+                                     sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
                                      addr: &SocketAddr,
                                      token: &String,
                                      nonce: &mut String,
@@ -107,7 +107,7 @@ pub(crate) async fn sign_up_handler( // handler function for the start screen
 
 async fn sign_up_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,

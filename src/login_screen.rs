@@ -20,7 +20,7 @@ use crate::{client_connection::update_nonce, connection_info::ConnectionInfo, sc
 
 pub(crate) async fn start_screen_handler( // handler function for the start screen
                                           msg: &mut String,
-                                          sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+                                          sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
                                           addr: &SocketAddr,
                                           token: &String,
                                           nonce: &mut String,
@@ -61,7 +61,7 @@ pub(crate) async fn start_screen_handler( // handler function for the start scre
 
 async fn start_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -250,7 +250,7 @@ async fn resolve_result(result: impl Future<Output=Result<String, Error>> + Size
     }
 }
 
-pub(crate) async fn token_status_check(msg: String, token: &String, addr: &SocketAddr, status_check_timer: &mut i32, nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>) -> Result<String, Error> {
+pub(crate) async fn token_status_check(msg: String, token: &String, addr: &SocketAddr, status_check_timer: &mut i32, nonce: &mut String, sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>) -> Result<String, Error> {
     if msg == *token {
         // resets the timer when the status check is received
         debug!("status checked for {}", addr);

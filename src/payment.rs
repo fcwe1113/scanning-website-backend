@@ -29,7 +29,7 @@ impl CardInfo {
 
 pub(crate) async fn payment_handler(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
@@ -65,7 +65,7 @@ pub(crate) async fn payment_handler(
 
 async fn payment_screen(
     msg: &mut String,
-    sender: &mut SplitSink<WebSocketStream<TlsStream<TcpStream>>, Message>,
+    sender: &mut SplitSink<WebSocketStream<TcpStream>, Message>,
     addr: &SocketAddr,
     token: &String,
     nonce: &mut String,
