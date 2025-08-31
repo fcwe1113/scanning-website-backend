@@ -2,8 +2,6 @@
 
 This is my the backend of my thesis project, which is a supermarket barcode/QR code scanner designed to better shopping experiences. This is intended to be paired with the frontend, which is also available at https://github.com/fcwe1113/scanning-website
 
-# How To Run
-
 ## List of dependencies:
 anyhow
 
@@ -42,6 +40,8 @@ serde-email
 creditcard
 
 regex
+
+# How To Run
 
 ## Step by step setup
 
